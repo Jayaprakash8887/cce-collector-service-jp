@@ -10,7 +10,7 @@ CREATE TABLE dead_letter_event (
     rejection_reason VARCHAR NOT NULL
                      CHECK (rejection_reason IN (
                          'INVALID_ENVELOPE', 'INVALID_FHIR', 'DUPLICATE',
-                         'MISSING_SUBJECT', 'UNKNOWN_SOURCE', 'PAYLOAD_TOO_LARGE',
+                         'MISSING_SUBJECT', 'PAYLOAD_TOO_LARGE',
                          'DESERIALIZATION_ERROR', 'KAFKA_PUBLISH_FAILURE'
                      )),
     failure_stage    VARCHAR NOT NULL

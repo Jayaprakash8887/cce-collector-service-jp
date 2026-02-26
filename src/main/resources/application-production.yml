@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME:cce_collector}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 10
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS}
+    producer:
+      acks: all
+      retries: 5
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+cce:
+  collector:
+    source-allowlisting: true
+    fhir-validation:
+      enabled: true
+      strict-mode: false
+    outbox:
+      retry-interval-seconds: 15
+      retry-max-age-minutes: 120
+
+logging:
+  level:
+    org.openphc.cce.collector: INFO
+    root: WARN

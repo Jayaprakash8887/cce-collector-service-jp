@@ -1,0 +1,769 @@
+[
+  {
+    "_comment": "=== SCENARIO: Complete eBUZIMA Clinical Visit Workflow ===",
+    "_patient": "Marie-Claire KAYITESI, UPID: 260225-0002-5501",
+    "_facility": "Kicukiro Health Center (FOSA ID: 0002)",
+    "_protocol": "PlanDefinition/ebuzima-clinical-visit|1.0",
+    "_description": "Full operational workflow following the RHIE Resource Hierarchy: Visit Registration → Vital Signs → Consultation → Chief Complaint → Lab Order → Diagnosis → Prescription → Lab Result → Dispensing → Visit Closure. Demonstrates the eBUZIMA Pattern 4 (Complete Clinical Visit) as CloudEvents flowing through openHIM to CCE."
+  },
+  {
+    "_comment": "EVENT 1: Visit Registration — VISIT_ENCOUNTER created in eBUZIMA when patient arrives at the health center. Status is 'in-progress' (not 'finished'). This enrolls the patient into the operational workflow protocol.",
+    "_step": "enrollment (VISIT_ENCOUNTER)",
+    "_hierarchy": "ROOT — all subsequent resources reference this visit",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0001-4000-8000-000000000001",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.encounter",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:00:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "enc-visit-20260225-0001",
+    "correlationid": "corr-1343872c-636d-506f-b041-1e571d426932",
+    "data": {
+      "resourceType": "Encounter",
+      "id": "enc-uuid-visit-kicukiro-001",
+      "status": "in-progress",
+      "class": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        "code": "AMB",
+        "display": "ambulatory"
+      },
+      "type": [
+        {
+          "coding": [
+            {
+              "system": "http://openphc.org/encounter-types",
+              "code": "VISIT_ENCOUNTER",
+              "display": "Visit Encounter"
+            }
+          ]
+        }
+      ],
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "participant": [
+        {
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
+                  "code": "ADM",
+                  "display": "admitter"
+                }
+              ]
+            }
+          ],
+          "individual": {
+            "reference": "Practitioner/reg-nurse-kicukiro-001",
+            "display": "Nurse MUKAMANA Aline"
+          }
+        }
+      ],
+      "period": {
+        "start": "2026-02-25T08:00:00Z"
+      },
+      "location": [
+        {
+          "location": {
+            "reference": "Location/kicukiro-hc-uuid",
+            "display": "Kicukiro Health Center"
+          },
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 2: Vital Signs — Blood Pressure recorded at Nursing Station. Observation with category 'vital-signs'. References the Visit Encounter.",
+    "_step": "vital-signs-recording",
+    "_hierarchy": "CHILD of Visit Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0002-4000-8000-000000000002",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.observation",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:10:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "obs-vitals-bp-20260225-0001",
+    "correlationid": "corr-08f6f7d2-f5c6-591e-8cd1-61dfeb753d82",
+    "data": {
+      "resourceType": "Observation",
+      "id": "obs-uuid-bp-kicukiro-001",
+      "status": "final",
+      "category": [
+        {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+              "code": "vital-signs",
+              "display": "Vital Signs"
+            }
+          ]
+        }
+      ],
+      "code": {
+        "coding": [
+          {
+            "system": "http://loinc.org",
+            "code": "85354-9",
+            "display": "Blood pressure panel"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-visit-kicukiro-001"
+      },
+      "effectiveDateTime": "2026-02-25T08:10:00Z",
+      "performer": [
+        {
+          "reference": "Practitioner/reg-nurse-kicukiro-001",
+          "display": "Nurse MUKAMANA Aline"
+        }
+      ],
+      "component": [
+        {
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8480-6",
+                "display": "Systolic blood pressure"
+              }
+            ]
+          },
+          "valueQuantity": {
+            "value": 128,
+            "unit": "mmHg",
+            "system": "http://unitsofmeasure.org",
+            "code": "mm[Hg]"
+          }
+        },
+        {
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "8462-4",
+                "display": "Diastolic blood pressure"
+              }
+            ]
+          },
+          "valueQuantity": {
+            "value": 82,
+            "unit": "mmHg",
+            "system": "http://unitsofmeasure.org",
+            "code": "mm[Hg]"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 3: Vital Signs — Temperature also recorded at Nursing Station. Another vital-signs Observation. (Note: the protocol step 'vital-signs-recording' already completed on EVENT 2; this event won't match an open step but demonstrates multiple vitals per visit.)",
+    "_step": "(already completed — additional vital sign for same visit)",
+    "_hierarchy": "CHILD of Visit Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0003-4000-8000-000000000003",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.observation",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:12:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "obs-vitals-temp-20260225-0001",
+    "correlationid": "corr-76a59854-769c-534f-bad6-cb020cc0b291",
+    "data": {
+      "resourceType": "Observation",
+      "id": "obs-uuid-temp-kicukiro-001",
+      "status": "final",
+      "category": [
+        {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+              "code": "vital-signs",
+              "display": "Vital Signs"
+            }
+          ]
+        }
+      ],
+      "code": {
+        "coding": [
+          {
+            "system": "http://loinc.org",
+            "code": "8310-5",
+            "display": "Body temperature"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-visit-kicukiro-001"
+      },
+      "effectiveDateTime": "2026-02-25T08:12:00Z",
+      "valueQuantity": {
+        "value": 37.8,
+        "unit": "°C",
+        "system": "http://unitsofmeasure.org",
+        "code": "Cel"
+      }
+    }
+  },
+  {
+    "_comment": "EVENT 4: Consultation Encounter — CONSULTATION_ENCOUNTER created as child of the Visit Encounter (via partOf). Patient proceeds from nursing station to clinician. This is the key eBUZIMA resource hierarchy link.",
+    "_step": "consultation-encounter",
+    "_hierarchy": "CHILD of Visit Encounter (via partOf reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0004-4000-8000-000000000004",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.encounter",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:30:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "enc-consult-20260225-0001",
+    "correlationid": "corr-a27aa35e-bb32-52e7-b7e2-4df36ff3a1c6",
+    "data": {
+      "resourceType": "Encounter",
+      "id": "enc-uuid-consult-kicukiro-001",
+      "status": "in-progress",
+      "class": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        "code": "AMB",
+        "display": "ambulatory"
+      },
+      "type": [
+        {
+          "coding": [
+            {
+              "system": "http://openphc.org/encounter-types",
+              "code": "CONSULTATION_ENCOUNTER",
+              "display": "Consultation Encounter"
+            }
+          ]
+        }
+      ],
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "participant": [
+        {
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
+                  "code": "ATND",
+                  "display": "attender"
+                }
+              ]
+            }
+          ],
+          "individual": {
+            "reference": "Practitioner/dr-kicukiro-mugabo-001",
+            "display": "Dr. MUGABO Emmanuel"
+          }
+        }
+      ],
+      "period": {
+        "start": "2026-02-25T08:30:00Z"
+      },
+      "partOf": {
+        "reference": "Encounter/enc-uuid-visit-kicukiro-001"
+      },
+      "location": [
+        {
+          "location": {
+            "reference": "Location/kicukiro-hc-uuid",
+            "display": "Kicukiro Health Center"
+          },
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 5: Chief Complaint — Observation with category 'survey'. Clinician records the patient's presenting complaint: persistent headache and mild fever.",
+    "_step": "chief-complaint",
+    "_hierarchy": "CHILD of Consultation Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0005-4000-8000-000000000005",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.observation",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:35:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "obs-cc-20260225-0001",
+    "correlationid": "corr-c562daa0-c4da-5d1e-a97d-ed997f09df64",
+    "data": {
+      "resourceType": "Observation",
+      "id": "obs-uuid-cc-kicukiro-001",
+      "status": "final",
+      "category": [
+        {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+              "code": "survey",
+              "display": "Survey"
+            }
+          ]
+        }
+      ],
+      "code": {
+        "coding": [
+          {
+            "system": "http://snomed.info/sct",
+            "code": "33962009",
+            "display": "Chief complaint"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-consult-kicukiro-001"
+      },
+      "effectiveDateTime": "2026-02-25T08:35:00Z",
+      "valueString": "Persistent headache for 3 days with mild fever and body aches"
+    }
+  },
+  {
+    "_comment": "EVENT 6: Lab Order — ServiceRequest for Full Blood Count. Clinician suspects infection and orders lab investigation. Category 108252007 (Laboratory procedure), intent: order.",
+    "_step": "lab-order",
+    "_hierarchy": "CHILD of Consultation Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0006-4000-8000-000000000006",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.servicerequest",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:40:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "sr-lab-20260225-0001",
+    "correlationid": "corr-49cbb291-a391-5526-84cb-62f60e6d8d13",
+    "data": {
+      "resourceType": "ServiceRequest",
+      "id": "sr-uuid-fbc-kicukiro-001",
+      "status": "active",
+      "intent": "order",
+      "category": [
+        {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "108252007",
+              "display": "Laboratory procedure"
+            }
+          ]
+        }
+      ],
+      "code": {
+        "coding": [
+          {
+            "system": "http://snomed.info/sct",
+            "code": "15220000",
+            "display": "Full Blood Count"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-consult-kicukiro-001"
+      },
+      "occurrenceDateTime": "2026-02-25T08:40:00Z",
+      "requester": {
+        "reference": "Practitioner/dr-kicukiro-mugabo-001",
+        "display": "Dr. MUGABO Emmanuel"
+      },
+      "performer": [
+        {
+          "reference": "Practitioner/lab-tech-kicukiro-001",
+          "display": "Lab Tech NSHIMIYIMANA Claude"
+        }
+      ],
+      "locationReference": [
+        {
+          "reference": "Location/kicukiro-hc-uuid",
+          "display": "Kicukiro Health Center"
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 7: Diagnosis — Condition resource. Clinician enters clinical diagnosis: Malaria due to Plasmodium falciparum (ICD-11 1F40). ClinicalStatus active, verificationStatus provisional (awaiting lab confirmation).",
+    "_step": "diagnosis",
+    "_hierarchy": "CHILD of Consultation Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0007-4000-8000-000000000007",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.condition",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:45:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "cond-20260225-0001",
+    "correlationid": "corr-345f27e2-ea6b-57bb-9066-b99d053fdfae",
+    "data": {
+      "resourceType": "Condition",
+      "id": "cond-uuid-malaria-kicukiro-001",
+      "clinicalStatus": {
+        "coding": [
+          {
+            "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+            "code": "active",
+            "display": "Active"
+          }
+        ]
+      },
+      "verificationStatus": {
+        "coding": [
+          {
+            "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+            "code": "provisional",
+            "display": "Provisional"
+          }
+        ]
+      },
+      "code": {
+        "coding": [
+          {
+            "system": "https://icd.who.int",
+            "code": "1F40",
+            "display": "Malaria due to Plasmodium falciparum"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-consult-kicukiro-001"
+      },
+      "recordedDate": "2026-02-25T08:45:00Z",
+      "asserter": {
+        "reference": "Practitioner/dr-kicukiro-mugabo-001",
+        "display": "Dr. MUGABO Emmanuel"
+      }
+    }
+  },
+  {
+    "_comment": "EVENT 8: Medication Prescription — MedicationRequest for Artemether-Lumefantrine (SNOMED 429681001). E-Prescription with groupIdentifier linking related medications.",
+    "_step": "medication-prescription",
+    "_hierarchy": "CHILD of Consultation Encounter (via encounter reference)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0008-4000-8000-000000000008",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.medicationrequest",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T08:50:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "medreq-20260225-0001",
+    "correlationid": "corr-41940d15-a6fe-59ef-bb56-60ab0b9a62b4",
+    "data": {
+      "resourceType": "MedicationRequest",
+      "id": "medreq-uuid-alm-kicukiro-001",
+      "status": "active",
+      "intent": "order",
+      "medicationCodeableConcept": {
+        "coding": [
+          {
+            "system": "http://snomed.info/sct",
+            "code": "429681001",
+            "display": "Artemether-Lumefantrine"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-consult-kicukiro-001"
+      },
+      "authoredOn": "2026-02-25T08:50:00Z",
+      "requester": {
+        "reference": "Practitioner/dr-kicukiro-mugabo-001",
+        "display": "Dr. MUGABO Emmanuel"
+      },
+      "groupIdentifier": {
+        "value": "PR-2026-02-25-001"
+      },
+      "dosageInstruction": [
+        {
+          "text": "4 tablets twice daily for 3 days",
+          "timing": {
+            "repeat": {
+              "frequency": 2,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsDuration": {
+                "value": 3,
+                "unit": "d"
+              }
+            }
+          },
+          "route": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "26643006",
+                "display": "Oral"
+              }
+            ]
+          },
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 4,
+                "unit": "tablet"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 9: Lab Result — Observation with category 'laboratory'. Lab technician enters Full Blood Count results (WBC elevated, suggesting infection). Arrives asynchronously after lab processing.",
+    "_step": "lab-result",
+    "_hierarchy": "CHILD of Visit Encounter (lab results reference visit, not consultation)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0009-4000-8000-000000000009",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.observation",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T10:15:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "obs-lab-fbc-20260225-0001",
+    "correlationid": "corr-40a4bec7-318b-5abf-abe8-bb29ff014c54",
+    "data": {
+      "resourceType": "Observation",
+      "id": "obs-uuid-fbc-kicukiro-001",
+      "status": "final",
+      "category": [
+        {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+              "code": "laboratory",
+              "display": "Laboratory"
+            }
+          ]
+        }
+      ],
+      "code": {
+        "coding": [
+          {
+            "system": "http://loinc.org",
+            "code": "33747-0",
+            "display": "White blood cell count"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "encounter": {
+        "reference": "Encounter/enc-uuid-visit-kicukiro-001"
+      },
+      "effectiveDateTime": "2026-02-25T10:15:00Z",
+      "performer": [
+        {
+          "reference": "Practitioner/lab-tech-kicukiro-001",
+          "display": "Lab Tech NSHIMIYIMANA Claude"
+        }
+      ],
+      "valueQuantity": {
+        "value": 12.5,
+        "unit": "10*9/L",
+        "system": "http://unitsofmeasure.org",
+        "code": "10*9/L"
+      },
+      "referenceRange": [
+        {
+          "low": {
+            "value": 4.0,
+            "unit": "10*9/L"
+          },
+          "high": {
+            "value": 11.0,
+            "unit": "10*9/L"
+          },
+          "text": "Normal range"
+        }
+      ],
+      "interpretation": [
+        {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+              "code": "H",
+              "display": "High"
+            }
+          ]
+        }
+      ],
+      "basedOn": [
+        {
+          "reference": "ServiceRequest/sr-uuid-fbc-kicukiro-001"
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 10: Medication Dispensing — MedicationDispense from pharmacy. Pharmacist dispenses the Artemether-Lumefantrine prescribed earlier. References the original MedicationRequest.",
+    "_step": "medication-dispensing",
+    "_hierarchy": "CHILD of Visit Encounter (dispensing happens at pharmacy station)",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0010-4000-8000-000000000010",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.medicationdispense",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T10:30:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "meddisp-20260225-0001",
+    "correlationid": "corr-3c54396f-0ed6-5b0d-b527-494839a898f9",
+    "data": {
+      "resourceType": "MedicationDispense",
+      "id": "meddisp-uuid-alm-kicukiro-001",
+      "status": "completed",
+      "medicationCodeableConcept": {
+        "coding": [
+          {
+            "system": "http://snomed.info/sct",
+            "code": "429681001",
+            "display": "Artemether-Lumefantrine"
+          }
+        ]
+      },
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "performer": [
+        {
+          "actor": {
+            "reference": "Practitioner/pharmacist-kicukiro-001",
+            "display": "Pharmacist INGABIRE Diane"
+          }
+        }
+      ],
+      "authorizingPrescription": [
+        {
+          "reference": "MedicationRequest/medreq-uuid-alm-kicukiro-001"
+        }
+      ],
+      "quantity": {
+        "value": 24,
+        "unit": "tablet",
+        "system": "http://unitsofmeasure.org"
+      },
+      "whenHandedOver": "2026-02-25T10:30:00Z",
+      "dosageInstruction": [
+        {
+          "text": "4 tablets twice daily for 3 days"
+        }
+      ]
+    }
+  },
+  {
+    "_comment": "EVENT 11: Visit Closure — VISIT_ENCOUNTER updated to status 'finished'. The visit period end time is set. This is the final step in the eBUZIMA workflow (PUT /Encounter/{visit-id}). All clinical activities are complete.",
+    "_step": "visit-completion (VISIT_ENCOUNTER status → finished)",
+    "_hierarchy": "ROOT — same resource as enrollment, now closed",
+    "_kafka_topic": "cce.events.inbound",
+    "_kafka_key": "260225-0002-5501",
+    "specversion": "1.0",
+    "id": "evt-eb010001-0011-4000-8000-000000000011",
+    "source": "rhie-mediator",
+    "type": "org.openphc.cce.encounter",
+    "subject": "260225-0002-5501",
+    "time": "2026-02-25T10:45:00Z",
+    "datacontenttype": "application/fhir+json",
+    "facilityid": "0002",
+    "sourceeventid": "enc-visit-close-20260225-0001",
+    "correlationid": "corr-29ad4a32-ebc0-5c3c-97bc-09f90a01fe65",
+    "data": {
+      "resourceType": "Encounter",
+      "id": "enc-uuid-visit-kicukiro-001",
+      "status": "finished",
+      "class": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        "code": "AMB",
+        "display": "ambulatory"
+      },
+      "type": [
+        {
+          "coding": [
+            {
+              "system": "http://openphc.org/encounter-types",
+              "code": "VISIT_ENCOUNTER",
+              "display": "Visit Encounter"
+            }
+          ]
+        }
+      ],
+      "subject": {
+        "reference": "Patient/260225-0002-5501",
+        "display": "Marie-Claire KAYITESI"
+      },
+      "period": {
+        "start": "2026-02-25T08:00:00Z",
+        "end": "2026-02-25T10:45:00Z"
+      },
+      "location": [
+        {
+          "location": {
+            "reference": "Location/kicukiro-hc-uuid",
+            "display": "Kicukiro Health Center"
+          },
+          "status": "completed"
+        }
+      ]
+    }
+  }
+]

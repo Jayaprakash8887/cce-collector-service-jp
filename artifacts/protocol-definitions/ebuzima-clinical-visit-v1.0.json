@@ -1,0 +1,694 @@
+{
+  "resourceType": "PlanDefinition",
+  "url": "http://openphc.org/fhir/PlanDefinition/ebuzima-clinical-visit",
+  "version": "1.0",
+  "name": "eBuzimaClinicVisitWorkflow",
+  "title": "eBUZIMA Clinical Visit — Operational Workflow",
+  "status": "active",
+  "date": "2026-01-01",
+  "description": "Operational compliance protocol tracking the standard clinical visit workflow in eBUZIMA (Rwanda EMR). Monitors the complete patient journey from visit registration through vital signs, consultation, investigations, diagnosis, treatment, dispensing, and visit closure. Derived from the RHIE Resource Hierarchy and eBUZIMA integration patterns (Pattern 4: Complete Clinical Visit). Resource ordering: Visit Encounter → Vital Signs → Consultation Encounter → Chief Complaints → Lab/Imaging Orders → Diagnosis → Procedures → Prescriptions → Lab Results → Imaging Results → Dispensing → Administration → Transfer (if needed) → Visit Closure.",
+  "action": [
+    {
+      "id": "enrollment",
+      "title": "Visit Registration (VISIT_ENCOUNTER)",
+      "description": "Protocol enrollment triggered when a VISIT_ENCOUNTER is created in eBUZIMA. This is the top-level container encounter representing the patient's arrival and registration at the health facility. All subsequent clinical events reference this visit.",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "type",
+                  "code": [
+                    {
+                      "system": "http://openphc.org/encounter-types",
+                      "code": "VISIT_ENCOUNTER"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "condition": {
+            "language": "text/jsonlogic",
+            "expression": "{\"!=\": [{\"var\": \"resource.status\"}, \"finished\"]}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vital-signs-recording",
+      "title": "Vital Signs Recording",
+      "description": "Nursing station records vital signs (blood pressure, temperature, heart rate, weight, etc.). Per eBUZIMA flow, vitals are recorded immediately after visit registration before the patient proceeds to consultation. Completes on the first vital-signs Observation received for this patient/visit.",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Observation",
+              "codeFilter": [
+                {
+                  "path": "category",
+                  "code": [
+                    {
+                      "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                      "code": "vital-signs"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 0
+        }
+      ]
+    },
+    {
+      "id": "consultation-encounter",
+      "title": "Consultation Encounter (CONSULTATION_ENCOUNTER)",
+      "description": "Clinical consultation encounter created as a child of the Visit Encounter (via partOf reference). After vitals are recorded at the nursing station, the patient is seen by a clinician. This is the CONSULTATION_ENCOUNTER in the eBUZIMA resource hierarchy — all clinical activities (diagnosis, orders, prescriptions) reference this encounter.",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "type",
+                  "code": [
+                    {
+                      "system": "http://openphc.org/encounter-types",
+                      "code": "CONSULTATION_ENCOUNTER"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "vital-signs-recording",
+          "relationship": "after-end"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 0
+        }
+      ]
+    },
+    {
+      "id": "chief-complaint",
+      "title": "Chief Complaint Recording",
+      "description": "Clinician records patient's chief complaints as Observations with category 'survey'. These are the presenting symptoms/concerns that guide further investigation and diagnosis. Optional step — not all consultation flows require formal chief complaint recording.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Observation",
+              "codeFilter": [
+                {
+                  "path": "category",
+                  "code": [
+                    {
+                      "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                      "code": "survey"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "lab-order",
+      "title": "Laboratory Order",
+      "description": "Clinician orders laboratory investigation (ServiceRequest with category 108252007 = Laboratory procedure). Created during consultation when the clinician needs lab results to support diagnosis. Links to the consultation encounter.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "ServiceRequest",
+              "codeFilter": [
+                {
+                  "path": "category",
+                  "code": [
+                    {
+                      "system": "http://snomed.info/sct",
+                      "code": "108252007"
+                    }
+                  ]
+                },
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "active"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "condition": {
+            "language": "text/jsonlogic",
+            "expression": "{\"==\": [{\"var\": \"resource.intent\"}, \"order\"]}"
+          }
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "imaging-order",
+      "title": "Imaging Order",
+      "description": "Clinician orders imaging investigation (ServiceRequest with category 363679005 = Imaging). Optional — only when the clinician requires imaging (X-ray, ultrasound, etc.) to support diagnosis.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "ServiceRequest",
+              "codeFilter": [
+                {
+                  "path": "category",
+                  "code": [
+                    {
+                      "system": "http://snomed.info/sct",
+                      "code": "363679005"
+                    }
+                  ]
+                },
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "active"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "condition": {
+            "language": "text/jsonlogic",
+            "expression": "{\"==\": [{\"var\": \"resource.intent\"}, \"order\"]}"
+          }
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "diagnosis",
+      "title": "Diagnosis Entry (Condition)",
+      "description": "Clinician records a diagnosis as a FHIR Condition resource with ICD-11 coding. Per eBUZIMA workflow, diagnoses are entered after investigations and clinical assessment. Optional — some visits may not result in a new diagnosis (e.g., follow-ups).",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Condition",
+              "codeFilter": [
+                {
+                  "path": "clinicalStatus",
+                  "code": [
+                    {
+                      "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                      "code": "active"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "procedure",
+      "title": "Medical Procedure",
+      "description": "Medical procedure performed during the visit (ICHI-coded Procedure resource). Optional — only when a clinical procedure is conducted (e.g., wound dressing, minor surgery, ultrasound). Per Patient Flow: 'Conducts Medical Procedures if necessary'.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Procedure",
+              "codeFilter": [
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "completed"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "medication-prescription",
+      "title": "Medication Prescription (e-Prescription)",
+      "description": "Clinician prescribes medication(s) via MedicationRequest. In eBUZIMA, multiple prescriptions share a groupIdentifier (prescription code). This step completes on the first MedicationRequest in the prescription group. Optional — not all visits result in prescriptions.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "MedicationRequest",
+              "codeFilter": [
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "active"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "condition": {
+            "language": "text/jsonlogic",
+            "expression": "{\"==\": [{\"var\": \"resource.intent\"}, \"order\"]}"
+          }
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "lab-result",
+      "title": "Laboratory Result",
+      "description": "Lab technician enters results as Observation with category 'laboratory'. Obtained after the lab order is processed. May arrive same day or later (async). Tolerance: 3 days from order placement.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Observation",
+              "codeFilter": [
+                {
+                  "path": "category",
+                  "code": [
+                    {
+                      "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                      "code": "laboratory"
+                    }
+                  ]
+                },
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "final"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "lab-order",
+          "relationship": "after-end"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 3
+        }
+      ]
+    },
+    {
+      "id": "imaging-result",
+      "title": "Imaging Result (ImagingStudy)",
+      "description": "Imaging results recorded as ImagingStudy resource with DICOM modality codes. Obtained after the imaging order is processed. May arrive same day or later (async). Tolerance: 3 days from order placement.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "ImagingStudy",
+              "codeFilter": [
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "available"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "imaging-order",
+          "relationship": "after-end"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 3
+        }
+      ]
+    },
+    {
+      "id": "medication-dispensing",
+      "title": "Pharmacy Dispensing (MedicationDispense)",
+      "description": "Pharmacy dispenses prescribed medication. MedicationDispense with status 'completed' and reference to the original MedicationRequest. Per eBUZIMA flow, dispensing happens at the pharmacy station after consultation. Tolerance: 1 day.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "MedicationDispense",
+              "codeFilter": [
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "completed"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "medication-prescription",
+          "relationship": "after-end"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 1
+        }
+      ]
+    },
+    {
+      "id": "medication-administration",
+      "title": "Medication Administration",
+      "description": "Nurse/clinician administers medication to the patient (e.g., injection, IV infusion). MedicationAdministration with status 'completed'. Depends on dispensing. Optional — only for medications administered at the facility (not take-home).",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "MedicationAdministration",
+              "codeFilter": [
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "completed"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "medication-dispensing",
+          "relationship": "after-end"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 1
+        }
+      ]
+    },
+    {
+      "id": "transfer-encounter",
+      "title": "Transfer / Referral (TRANSFER_ENCOUNTER)",
+      "description": "Patient is transferred or referred to another facility. TRANSFER_ENCOUNTER in eBUZIMA, triggered when the clinician fills the External Transfer Form and records the transfer event. Includes hospitalization.destination for the receiving facility. Optional — only when referral to a higher facility is needed.",
+      "requiredBehavior": "could",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "type",
+                  "code": [
+                    {
+                      "system": "http://openphc.org/encounter-types",
+                      "code": "TRANSFER_ENCOUNTER"
+                    }
+                  ]
+                },
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "finished"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        },
+        {
+          "actionId": "consultation-encounter",
+          "relationship": "after-end"
+        }
+      ]
+    },
+    {
+      "id": "visit-completion",
+      "title": "Visit Closure (VISIT_ENCOUNTER finished)",
+      "description": "Visit Encounter is updated to status 'finished', closing the visit. This is the final step in the eBUZIMA workflow — corresponds to the PUT /Encounter/{visit-id} call that sets the visit period end time and status to finished. All clinical activities should be completed before visit closure.",
+      "trigger": [
+        {
+          "type": "data-added",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "type",
+                  "code": [
+                    {
+                      "system": "http://openphc.org/encounter-types",
+                      "code": "VISIT_ENCOUNTER"
+                    }
+                  ]
+                },
+                {
+                  "path": "status",
+                  "code": [
+                    {
+                      "code": "finished"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "enrollment",
+          "relationship": "after-start",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d"
+          }
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 1
+        }
+      ]
+    }
+  ]
+}

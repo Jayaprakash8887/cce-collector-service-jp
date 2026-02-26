@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: cce-collector-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:cce_collector}
+    username: ${DB_USER:cce_collector}
+    password: ${DB_PASSWORD:cce_collector}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 5
+        batch.size: 16384
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+cce:
+  kafka:
+    topics:
+      inbound: cce.events.inbound
+      dead-letter: cce.deadletter
+  collector:
+    max-payload-size: 1048576
+    max-batch-size: 100
+    max-batch-payload-size: 10485760
+    source-allowlisting: false
+    fhir-validation:
+      enabled: true
+      strict-mode: false
+    dedup:
+      redis-enabled: true
+    outbox:
+      retry-interval-seconds: 30
+      retry-max-age-minutes: 60
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      application: cce-collector-service
+
+logging:
+  level:
+    org.openphc.cce.collector: INFO
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN

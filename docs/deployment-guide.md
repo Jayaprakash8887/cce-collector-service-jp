@@ -157,7 +157,6 @@ Flyway runs automatically on startup. Migrations are located in `src/main/resour
 | `V1__create_inbound_event.sql` | `inbound_event` table with dedup constraint |
 | `V2__create_event_log.sql` | `event_log` table, partitioned by month (Jan–Jun 2026) |
 | `V3__create_dead_letter_event.sql` | `dead_letter_event` table with retry support |
-| `V4__remove_unknown_source_from_dead_letter.sql` | Removes `UNKNOWN_SOURCE` from rejection_reason CHECK constraint |
 
 ### Manual Migration Execution
 

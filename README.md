@@ -162,3 +162,15 @@ src/main/java/org/openphc/cce/collector/
 │   └── exception/ — Exception handlers
 └── fhir/          — FHIR R4 parsing and validation
 ```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System context, responsibilities, package structure, processing algorithm, database schema |
+| [API Reference](docs/api-reference.md) | REST endpoints, request/response schemas, error codes, validation rules |
+| [Data Dictionary](docs/data-dictionary.md) | All database tables, columns, enums, CloudEvents fields, field name mappings |
+| [Kafka Events](docs/kafka-events.md) | Topics, message schema, outbox pattern, partitioning, sample payloads |
+| [Flow Diagrams](docs/flow-diagrams.md) | Mermaid diagrams — ingestion flow, sequence diagrams, ER diagram, system context |
+| [Deployment Guide](docs/deployment-guide.md) | Local setup, Docker, Kubernetes, configuration profiles, migrations |
+| [Operations Runbook](docs/operations-runbook.md) | Health checks, monitoring, dead letter management, troubleshooting |

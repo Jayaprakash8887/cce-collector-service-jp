@@ -71,7 +71,6 @@ The Collector Service is the **single point of entry** for all clinical events i
 | Build tool | Maven | 3.9+ |
 | Database | PostgreSQL | 16+ (latest stable) |
 | Message broker | Apache Kafka | 3.7+ (KRaft mode) |
-| Cache | Redis | 7.x |
 | FHIR library | HAPI FHIR | 7.4.0 |
 | DB access | Spring Data JPA + Hibernate | (Spring Boot managed) |
 | DB migration | Flyway | (Spring Boot managed) |
@@ -101,7 +100,7 @@ The Collector Service is the **single point of entry** for all clinical events i
 
 <!-- Spring Boot starters -->
 <!-- spring-boot-starter-web, spring-boot-starter-data-jpa, spring-kafka,
-     spring-boot-starter-data-redis, spring-boot-starter-actuator,
+     spring-boot-starter-actuator,
      spring-boot-starter-validation -->
 ```
 
@@ -119,7 +118,6 @@ cce-collector-service/
 │   │   │   ├── config/
 │   │   │   │   ├── KafkaProducerConfig.java
 │   │   │   │   ├── FhirConfig.java              # FhirContext.forR4() singleton bean
-│   │   │   │   ├── RedisConfig.java
 │   │   │   │   ├── JpaConfig.java
 │   │   │   │   ├── SecurityConfig.java           # mTLS / API key validation
 │   │   │   │   └── WebConfig.java                # CORS, request logging
@@ -144,7 +142,7 @@ cce-collector-service/
 │   │   │   │   ├── CloudEventValidator.java      # CloudEvents v1.0 envelope validation
 │   │   │   │   ├── FhirPayloadValidator.java     # FHIR R4 structural validation via HAPI
 │   │   │   │   ├── EventNormalizer.java           # Standardize types, fill defaults, extract metadata
-│   │   │   │   ├── DeduplicationService.java      # (id, source) compound dedup via Redis fast-path + DB
+│   │   │   │   ├── DeduplicationService.java      # (id, source) compound dedup via PostgreSQL with lookback window
 │   │   │   │   ├── EventPublisher.java            # Publishes event_log records to Kafka (outbox)
 │   │   │   │   ├── SourceRegistrationService.java # Manage allowed event sources
 │   │   │   │   └── DeadLetterService.java         # Persist and optionally publish dead letters
@@ -184,7 +182,7 @@ cce-collector-service/
 │           ├── fhir/
 │           └── integration/
 ├── Dockerfile
-├── docker-compose.yml                               # local dev: PostgreSQL, Kafka, Redis
+├── docker-compose.yml                               # local dev: PostgreSQL, Kafka
 ├── .github/
 │   └── copilot-instructions.md                      # this file
 └── README.md
@@ -495,9 +493,9 @@ Per the CloudEvents specification, extension attribute names are `lowercase` wit
 4. Persist to inbound_event table (status = 'received', raw_payload = original request body)
    — This is the first write: raw audit record before any transformation
 5. Deduplication Check
-   a. Redis fast-path: GET idempotency:{source}:{cloudevents_id}
-      - If key exists → update inbound_event.status = 'duplicate', return 200 (idempotent)
-   b. If not in Redis → proceed (DB unique constraint on event_log is the authoritative check)
+   a. Query PostgreSQL: check if (source, cloudevents_id) exists within lookback window
+      - If exists → update inbound_event.status = 'duplicate', return 200 (idempotent)
+   b. If not found → proceed (DB unique constraint on event_log is the authoritative check)
 6. Normalization
    a. Normalize event type to org.openphc.cce.* pattern
    b. Generate correlationid if absent (new UUID with "corr-" prefix)
@@ -519,8 +517,7 @@ Per the CloudEvents specification, extension attribute names are `lowercase` wit
        record kafka_topic, kafka_partition, kafka_offset, published_at
     d. On failure: event_log stays publish_status = 'pending' (retry on next attempt)
        + persist to dead_letter_event (failure_stage = 'kafka_publish')
-11. Set Redis idempotency key: SET idempotency:{source}:{cloudevents_id} 1 EX 86400
-12. Return HTTP response with ingestion receipt
+11. Return HTTP response with ingestion receipt
 ```
 
 ### Kafka Publish Contract
@@ -699,38 +696,23 @@ The Collector does not restrict resource types — any valid FHIR R4 resource is
 
 ## Deduplication Strategy
 
-Deduplication uses a **two-layer** approach: Redis fast-path (24h window) + PostgreSQL unique constraints (permanent).
+Deduplication uses PostgreSQL with a configurable lookback window + unique constraints (permanent).
 
-### Layer 1: Redis Key-Value Fast-Path
+### PostgreSQL Lookback Query
 
-Avoids a DB round-trip for the vast majority of duplicate submissions (retries, at-least-once delivery):
-
-```
-Key:   idempotency:{source}:{cloudevents_id}
-Value: 1
-TTL:   24 hours (86400 seconds)
-```
-
-On event arrival:
-1. `GET idempotency:{source}:{cloudevents_id}` — if key exists, return 200 (duplicate) immediately. No DB query needed.
-2. If key does NOT exist, proceed with normal processing.
-3. After successful Kafka publish, `SET idempotency:{source}:{cloudevents_id} 1 EX 86400`.
+On event arrival, the service queries PostgreSQL to check if a record with the same `(source, cloudevents_id)` exists within the configured lookback window (default: 30 days):
 
 ```java
-public boolean isDuplicateViaRedis(String source, String cloudeventsId) {
-    String key = "idempotency:" + source + ":" + cloudeventsId;
-    return Boolean.TRUE.equals(redisTemplate.hasKey(key));
-}
-
-public void markAsProcessed(String source, String cloudeventsId) {
-    String key = "idempotency:" + source + ":" + cloudeventsId;
-    redisTemplate.opsForValue().set(key, "1", Duration.ofHours(24));
+public boolean isDuplicate(String source, String cloudeventsId) {
+    OffsetDateTime since = OffsetDateTime.now().minusDays(lookbackDays);
+    return inboundEventRepository
+        .existsByCloudeventsIdAndSourceAndReceivedAtAfter(cloudeventsId, source, since);
 }
 ```
 
-The 24-hour TTL covers the vast majority of duplicate submissions. Events older than 24h fall through to the DB constraint.
+The lookback window is configurable via `cce.collector.dedup.lookback-days` (default: 30 days). This limits the dedup query scope instead of scanning the entire database.
 
-### Layer 2: PostgreSQL Unique Constraints (Authoritative)
+### PostgreSQL Unique Constraints (Authoritative)
 
 Both tables have unique constraints that serve as the permanent deduplication layer:
 
@@ -753,17 +735,6 @@ On duplicate insert, PostgreSQL raises a constraint violation → the service re
 - The event is **not** re-published to Kafka on duplicate submission
 - Secondary dedup: same `source` + `source_event_id` (different `id`) also detected as duplicate via `event_log` index
 - This follows the standard idempotent POST pattern used by openHIM mediators
-
----
-
-## Redis Usage (Collector Service Scope)
-
-The Collector Service uses Redis for:
-
-1. **Idempotency fast-path** — `idempotency:{source}:{cloudevents_id}` with 24h TTL (avoids DB round-trip for recent duplicates)
-2. **Source registration cache** — cache active source registrations to avoid DB lookups per request
-
-Redis is **optional** — the service MUST function correctly without Redis (fallback to DB-only dedup via unique constraints and DB-only source lookups).
 
 ---
 
@@ -885,7 +856,7 @@ Timer.builder("cce.collector.ingestion.duration")
     .register(meterRegistry);
 
 // Event ingestion latency (end-to-end: receive → publish)
-- `/actuator/health` — includes Kafka producer, PostgreSQL, Redis connectivity
+- `/actuator/health` — includes Kafka producer, PostgreSQL connectivity
 - `/actuator/health/liveness` — basic liveness (JVM is running)
 - `/actuator/health/readiness` — readiness (Kafka producer connected, DB accessible)
 - `/actuator/prometheus` — Micrometer metrics for Prometheus scraping
@@ -939,7 +910,7 @@ public class EventIngestionController {
   1. **Transaction 1:** Insert raw record into `inbound_event` (status = 'received') — immediate audit trail
   2. **Transaction 2:** Validate, normalize, insert into `event_log` (publish_status = 'pending'), update `inbound_event.status = 'accepted'`
   3. **After commit:** Publish `event_log` record to Kafka
-  4. **On Kafka success:** Update `event_log.publish_status = 'published'`, record Kafka metadata, set Redis idempotency key
+  4. **On Kafka success:** Update `event_log.publish_status = 'published'`, record Kafka metadata
   5. **On Kafka failure:** `event_log` stays `publish_status = 'pending'`, persist to `dead_letter_event` (failure_stage = 'kafka_publish')
 - A **retry mechanism** (scheduled task or on-demand) scans `event_log WHERE publish_status = 'pending' AND received_at < now() - interval '30 seconds'` to re-publish failed events
 - Keep transactions short — avoid holding DB locks during Kafka operations
@@ -968,7 +939,7 @@ public class EventIngestionController {
 - `DeduplicationService` — duplicate detection logic
 
 ### Integration Tests
-- Use **Testcontainers** for PostgreSQL, Kafka, and Redis
+- Use **Testcontainers** for PostgreSQL and Kafka
 - Test full ingestion flow: HTTP POST → validation → DB persist → Kafka publish → verify message on topic
 - Test deduplication: submit same event twice, verify idempotent response
 - Test dead-lettering: invalid events persisted with correct rejection reasons
@@ -1018,10 +989,6 @@ spring:
       properties:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
 
 cce:
   kafka:
@@ -1035,7 +1002,7 @@ cce:
       enabled: true
       strict-mode: false               # true = reject on any warning; false = warnings logged only
     dedup:
-      redis-enabled: true              # Enable Redis key-value fast-path dedup (24h TTL)
+      lookback-days: 30               # Number of days to check for duplicates (default: 30)
     outbox:
       retry-interval-seconds: 30       # How often to scan event_log for unpublished records
       retry-max-age-minutes: 60        # Stop retrying after this age
@@ -1064,7 +1031,7 @@ management:
 
 ### docker-compose.yml (local dev)
 
-Include PostgreSQL 16, Kafka (KRaft, single broker), and Redis 7 for local development. Flyway runs automatically on application startup.
+Include PostgreSQL 16 and Kafka (KRaft, single broker) for local development. Flyway runs automatically on application startup.
 
 ```yaml
 version: '3.8'
@@ -1096,16 +1063,11 @@ services:
     ports:
       - "9092:9092"
 
-  cce-redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
 volumes:
   collector-pgdata:
 ```
 
-Note: If running alongside the Compliance Service locally, share the same Kafka and Redis containers. The Collector uses a **separate PostgreSQL database** (`cce_collector` on port 5433) from the Compliance Service (`cce` on port 5432).
+Note: If running alongside the Compliance Service locally, share the same Kafka container. The Collector uses a **separate PostgreSQL database** (`cce_collector` on port 5433) from the Compliance Service (`cce` on port 5432).
 
 ### Dockerfile
 

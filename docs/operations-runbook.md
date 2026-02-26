@@ -14,7 +14,6 @@ Expected response:
   "status": "UP",
   "components": {
     "db": { "status": "UP" },
-    "redis": { "status": "UP" },
     "kafka": { "status": "UP" },
     "diskSpace": { "status": "UP" }
   }
@@ -37,9 +36,6 @@ curl -s http://localhost:8080/actuator/health | jq .status
 
 echo "=== PostgreSQL ==="
 psql -h localhost -p 5433 -U cce_user -d cce_collector -c "SELECT 1;"
-
-echo "=== Redis ==="
-redis-cli -h localhost -p 6379 PING
 
 echo "=== Kafka ==="
 kafka-topics.sh --list --bootstrap-server localhost:9092
@@ -251,53 +247,7 @@ export CCE_COLLECTOR_OUTBOX_MAX_RETRY_BATCH_SIZE=500
 
 ---
 
-## 5. Redis Cache Management
-
-### Purpose
-
-Redis stores idempotency keys for fast-path deduplication:
-- **Key pattern:** `idempotency:{source}:{cloudevents_id}`
-- **TTL:** 24 hours
-- **Value:** `"1"`
-
-### Diagnostics
-
-```bash
-# Check Redis connectivity
-redis-cli PING
-
-# Count idempotency keys
-redis-cli KEYS "idempotency:*" | wc -l
-
-# Check a specific key
-redis-cli GET "idempotency:ebuzima/kigali-south:evt-001"
-
-# Check TTL
-redis-cli TTL "idempotency:ebuzima/kigali-south:evt-001"
-```
-
-### Cache Flush (Emergency)
-
-```bash
-# Flush only idempotency keys (safe — DB constraints catch duplicates)
-redis-cli KEYS "idempotency:*" | xargs redis-cli DEL
-
-# Flush entire Redis (if only used by Collector)
-redis-cli FLUSHDB
-```
-
-> **Impact:** Flushing Redis will cause some duplicate events to be processed again. The DB unique constraint will catch them, resulting in harmless constraint violation errors logged at WARN level. No duplicate events will reach Kafka.
-
-### Redis Down Scenario
-
-The service operates correctly **without Redis**. If Redis is unavailable:
-1. Deduplication falls back to DB-only (slight increase in DB load)
-2. `idempotency key SET` operations fail silently (logged at WARN)
-3. No data loss or duplicate publishing
-
----
-
-## 6. Source Registration
+## 5. Source Registration
 
 ### Register a New Source
 
@@ -340,7 +290,7 @@ When enabled, events from unregistered or inactive sources are **rejected with H
 
 ---
 
-## 7. Database Maintenance
+## 6. Database Maintenance
 
 ### Partition Management
 
@@ -391,7 +341,7 @@ DELETE FROM inbound_event WHERE received_at < NOW() - INTERVAL '90 days';
 
 ---
 
-## 8. Troubleshooting
+## 7. Troubleshooting
 
 ### Event Not Reaching Kafka
 
@@ -478,11 +428,10 @@ DELETE FROM inbound_event WHERE received_at < NOW() - INTERVAL '90 days';
 | `Connection refused: localhost:5433` | PostgreSQL not running | Start PostgreSQL |
 | `Flyway migration failed` | Schema conflict | Check migration history: `SELECT * FROM flyway_schema_history;` |
 | `KafkaException: Node -1 disconnected` | Kafka not reachable | Check Kafka broker |
-| `RedisConnectionFailureException` | Redis not running | Redis is optional — app will start but log warnings |
 
 ---
 
-## 9. Log Analysis
+## 8. Log Analysis
 
 ### Log Format
 
@@ -533,7 +482,7 @@ The following MDC fields are set per-request for correlation:
 
 ---
 
-## 10. Emergency Procedures
+## 9. Emergency Procedures
 
 ### Kafka Total Outage
 
@@ -548,13 +497,6 @@ The following MDC fields are set per-request for correlation:
 2. No data loss — events are not accepted without DB persistence
 3. Source systems (openHIM) will retry based on their retry policy
 4. Restore database and restart the service
-
-### Redis Total Outage
-
-1. Service continues operating normally
-2. Deduplication falls back to DB-only
-3. Slight increase in DB load for duplicate checks
-4. Redis reconnects automatically when restored
 
 ### Rollback Deployment
 

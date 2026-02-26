@@ -14,7 +14,7 @@ It receives clinical events from external EHR/RHIE systems (via openHIM mediator
 | 2 | **Validate CloudEvents envelope** | Mandatory fields (`specversion`, `id`, `source`, `type`, `subject`), extensions, structure |
 | 3 | **Validate FHIR R4 payloads** | Structural validation of `data` when `datacontenttype` = `application/fhir+json` |
 | 4 | **Normalize event metadata** | Standardize event types, extract patient IDs, generate missing fields |
-| 5 | **Deduplicate inbound events** | Reject/mark duplicates using `(id, source)` compound key via Redis + PostgreSQL |
+| 5 | **Deduplicate inbound events** | Reject/mark duplicates using `(id, source)` compound key via PostgreSQL with configurable lookback window |
 | 6 | **Publish to Kafka** | Topic `cce.events.inbound` with `subject` (patient_id) as partition key |
 | 7 | **Dead-letter invalid events** | Persist rejected events with failure reasons for audit and retry |
 | 8 | **Health/readiness endpoints** | For Kubernetes orchestration |
@@ -65,7 +65,6 @@ It receives clinical events from external EHR/RHIE systems (via openHIM mediator
 | Build tool | Maven | 3.9+ |
 | Database | PostgreSQL | 16+ |
 | Message broker | Apache Kafka | 3.7+ (KRaft mode) |
-| Cache | Redis | 7.x |
 | FHIR library | HAPI FHIR | 7.4.0 |
 | DB access | Spring Data JPA + Hibernate | (Spring Boot managed) |
 | DB migration | Flyway | (Spring Boot managed) |
@@ -81,7 +80,6 @@ org.openphc.cce.collector/
 ├── config/                                # Spring configuration beans
 │   ├── KafkaProducerConfig.java           #   Kafka producer factory, templates, topic creation
 │   ├── FhirConfig.java                    #   FhirContext.forR4() singleton bean
-│   ├── RedisConfig.java                   #   StringRedisTemplate bean
 │   ├── JpaConfig.java                     #   Enables JPA repositories & transactions
 │   ├── SecurityConfig.java                #   Stateless security, CSRF disabled
 │   └── WebConfig.java                     #   CORS configuration
@@ -106,7 +104,7 @@ org.openphc.cce.collector/
 │   ├── CloudEventValidator.java           #   CloudEvents v1.0 envelope validation
 │   ├── FhirPayloadValidator.java          #   FHIR R4 structural validation via HAPI
 │   ├── EventNormalizer.java               #   Type normalization, correlation ID, time fill
-│   ├── DeduplicationService.java          #   Redis fast-path + DB dedup
+│   ├── DeduplicationService.java          #   DB dedup with configurable lookback window
 │   ├── EventPublisher.java                #   Outbox publisher + scheduled retry
 │   ├── SourceRegistrationService.java     #   Source CRUD + API key validation
 │   └── DeadLetterService.java             #   Dead-letter persistence and query
@@ -153,9 +151,9 @@ org.openphc.cce.collector/
     b. If unknown/inactive → 403 + persist to dead_letter_event
  4. Persist to inbound_event (status = 'RECEIVED', raw_payload = original body)
  5. Deduplication Check
-    a. Redis fast-path: GET idempotency:{source}:{cloudevents_id}
+    a. Query PostgreSQL: check if (source, cloudevents_id) exists within lookback window
        - If exists → update status = 'DUPLICATE', return 200 (idempotent)
-    b. If not in Redis → proceed (DB unique constraint is authoritative)
+    b. If not found → proceed (DB unique constraint is authoritative)
  6. Normalization
     a. Normalize event type to org.openphc.cce.* pattern
     b. Generate correlationid if absent (UUID with "corr-" prefix)
@@ -171,8 +169,7 @@ org.openphc.cce.collector/
     a. Key = subject (patient_id) — per-patient ordering
     b. On success: update publish_status = 'PUBLISHED', record Kafka metadata
     c. On failure: stays 'PENDING'/'FAILED', dead-letter created
-11. Set Redis idempotency key (24h TTL)
-12. Return HTTP 202 Accepted with ingestion receipt
+11. Return HTTP 202 Accepted with ingestion receipt
 ```
 
 ## 7. Database Schema
@@ -203,21 +200,15 @@ inbound_event  1 ──── 0..*  dead_letter_event   (inbound_event_id FK)
 
 ## 8. Deduplication Strategy
 
-Two-layer approach: **Redis fast-path** (24h window) + **PostgreSQL unique constraints** (permanent).
+PostgreSQL-based deduplication with a configurable lookback window (default: 30 days) + unique constraints (permanent).
 
-### Layer 1: Redis (Fast-Path)
+### Lookback Query
 
-```
-Key:   idempotency:{source}:{cloudevents_id}
-Value: "1"
-TTL:   24 hours
-```
+On event arrival, the service queries `inbound_event` for records matching `(source, cloudevents_id)` within the configured lookback window. This limits the query scope instead of scanning the entire database.
 
-Avoids a DB round-trip for the vast majority of duplicate submissions. Redis is **optional** — the service functions correctly without it (falls back to DB-only).
+### PostgreSQL Unique Constraints (Authoritative)
 
-### Layer 2: PostgreSQL (Authoritative)
-
-Unique constraints on both `inbound_event` and `event_log` tables catch any duplicates that slip past Redis (e.g., after TTL expiry).
+Unique constraints on both `inbound_event` and `event_log` tables serve as the permanent deduplication layer.
 
 ### Idempotency Contract
 

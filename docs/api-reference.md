@@ -350,7 +350,7 @@ The service performs field name translation between the HTTP inbound format and 
 | Constraint | Value |
 |-----------|-------|
 | Max event ID length | 256 characters |
-| Redis idempotency TTL | 24 hours |
+| Dedup lookback window | 30 days (configurable) |
 | Kafka publish retries | 3 |
 | Outbox retry interval | 30 seconds |
 | Max pending retries per cycle | 100 |

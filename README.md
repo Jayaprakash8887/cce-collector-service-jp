@@ -27,7 +27,6 @@ CCE Compliance Service
 | Build | Maven |
 | Database | PostgreSQL 16 |
 | Message Broker | Apache Kafka 3.7+ (KRaft) |
-| Cache | Redis 7.x |
 | FHIR | HAPI FHIR 7.4.0 |
 | DB Migration | Flyway |
 
@@ -45,7 +44,7 @@ CCE Compliance Service
 docker-compose up -d
 ```
 
-This starts PostgreSQL (port 5433), Kafka (port 9092), and Redis (port 6379).
+This starts PostgreSQL (port 5433) and Kafka (port 9092).
 
 ### 2. Build & Run
 
@@ -120,7 +119,7 @@ curl -X POST http://localhost:8080/v1/events \
 
 | Path | Description |
 |------|-------------|
-| `/actuator/health` | Health check (Kafka, DB, Redis) |
+| `/actuator/health` | Health check (Kafka, DB) |
 | `/actuator/health/liveness` | Kubernetes liveness probe |
 | `/actuator/health/readiness` | Kubernetes readiness probe |
 | `/actuator/prometheus` | Prometheus metrics |
@@ -131,7 +130,7 @@ curl -X POST http://localhost:8080/v1/events \
 2. **Validate** CloudEvents envelope (specversion, id, source, type, subject, data)
 3. **Validate source** (if allowlisting enabled)
 4. **Persist** raw event to `inbound_event` table (audit trail)
-5. **Deduplicate** via Redis fast-path (24h TTL) + DB unique constraints
+5. **Deduplicate** via PostgreSQL with configurable lookback window + DB unique constraints
 6. **Normalize** event type, correlation ID, timestamps
 7. **Validate FHIR** payload (if `datacontenttype = application/fhir+json`)
 8. **Persist** normalized event to `event_log` table (outbox)
@@ -157,15 +156,13 @@ Key environment variables:
 | `DB_USER` | cce_collector | Database user |
 | `DB_PASSWORD` | cce_collector | Database password |
 | `KAFKA_BROKERS` | localhost:9092 | Kafka brokers |
-| `REDIS_HOST` | localhost | Redis host |
-| `REDIS_PORT` | 6379 | Redis port |
 
 ## Project Structure
 
 ```
 src/main/java/org/openphc/cce/collector/
 ├── CollectorServiceApplication.java
-├── config/        — Spring configuration (Kafka, FHIR, Redis, Security, JPA, Web)
+├── config/        — Spring configuration (Kafka, FHIR, Security, JPA, Web)
 ├── domain/
 │   ├── model/     — JPA entities and enums
 │   └── repository/ — Spring Data JPA repositories

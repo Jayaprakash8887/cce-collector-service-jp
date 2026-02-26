@@ -8,7 +8,6 @@
 | Maven | 3.9+ | Only for building from source |
 | PostgreSQL | 16+ | Primary datastore |
 | Apache Kafka | 3.7+ | KRaft mode (no ZooKeeper) |
-| Redis | 7.x | Deduplication cache (optional) |
 | Docker | 24+ | For containerized deployment |
 | Docker Compose | 2.20+ | For local development |
 
@@ -26,7 +25,6 @@ docker compose up -d
 This starts:
 - **PostgreSQL** on port `5433` (user: `cce_user`, password: `cce_pass`, database: `cce_collector`)
 - **Kafka** on port `9092` (KRaft mode, single broker)
-- **Redis** on port `6379`
 
 ### 2.2 Build the Application
 
@@ -109,20 +107,13 @@ All configuration can be overridden via environment variables using Spring Boot'
 | `SPRING_KAFKA_PRODUCER_ACKS` | `all` | Producer acknowledgement level |
 | `SPRING_KAFKA_PRODUCER_RETRIES` | `3` | Producer retry count |
 
-### Redis
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SPRING_DATA_REDIS_HOST` | `localhost` | Redis host |
-| `SPRING_DATA_REDIS_PORT` | `6379` | Redis port |
-
 ### Application-Specific
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CCE_COLLECTOR_SOURCE_VALIDATION_ENABLED` | `false` | Enable source allowlisting |
 | `CCE_COLLECTOR_FHIR_STRICT_VALIDATION` | `false` | Enable strict FHIR validation |
-| `CCE_COLLECTOR_DEDUP_REDIS_TTL_HOURS` | `24` | Redis idempotency key TTL |
+| `CCE_COLLECTOR_DEDUP_LOOKBACK_DAYS` | `30` | Dedup lookback window (days) |
 | `CCE_COLLECTOR_KAFKA_TOPICS_INBOUND` | `cce.events.inbound` | Inbound events topic |
 | `CCE_COLLECTOR_KAFKA_TOPICS_DEAD_LETTER` | `cce.deadletter` | Dead letter topic |
 | `CCE_COLLECTOR_OUTBOX_RETRY_INTERVAL_MS` | `30000` | Outbox retry schedule |
@@ -153,7 +144,6 @@ docker run -d \
   -e SPRING_DATASOURCE_USERNAME=cce_user \
   -e SPRING_DATASOURCE_PASSWORD=cce_pass \
   -e SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-host:9092 \
-  -e SPRING_DATA_REDIS_HOST=redis-host \
   cce-collector-service:latest
 ```
 
@@ -244,11 +234,6 @@ spec:
                 configMapKeyRef:
                   name: cce-kafka-config
                   key: bootstrap-servers
-            - name: SPRING_DATA_REDIS_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: cce-redis-config
-                  key: host
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
@@ -340,7 +325,6 @@ kafka-topics.sh --create \
 - [ ] PostgreSQL: Tune `shared_buffers`, `work_mem`, `effective_cache_size`
 - [ ] Kafka: Create topics with production replication factor (≥ 3)
 - [ ] Kafka: Set `min.insync.replicas=2` on inbound topic
-- [ ] Redis: Configure `maxmemory-policy allkeys-lru` (cache workload)
 - [ ] Application: Set `SPRING_PROFILES_ACTIVE=production`
 - [ ] Application: Set real database credentials via secrets
 - [ ] Application: Configure `cce.collector.source-validation-enabled=true` in staging/production

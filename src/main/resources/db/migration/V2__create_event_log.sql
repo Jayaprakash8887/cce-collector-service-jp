@@ -23,12 +23,12 @@ CREATE TABLE event_log (
     kafka_topic              VARCHAR,
     kafka_partition          INT,
     kafka_offset             BIGINT,
-    UNIQUE (cloudevents_id, source)
+    UNIQUE (cloudevents_id, source, received_at)
 ) PARTITION BY RANGE (received_at);
 
--- Secondary idempotency index (source + source_event_id)
+-- Secondary idempotency index (source + source_event_id) — must include partition key
 CREATE UNIQUE INDEX idx_event_log_source_sourceeventid
-    ON event_log (source, source_event_id) WHERE source_event_id IS NOT NULL;
+    ON event_log (source, source_event_id, received_at) WHERE source_event_id IS NOT NULL;
 
 CREATE INDEX idx_event_log_subject      ON event_log (subject);
 CREATE INDEX idx_event_log_type         ON event_log (type);

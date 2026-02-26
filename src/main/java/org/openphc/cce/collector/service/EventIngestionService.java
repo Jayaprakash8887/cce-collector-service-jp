@@ -7,7 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.openphc.cce.collector.api.dto.*;
 import org.openphc.cce.collector.api.exception.CloudEventValidationException;
 import org.openphc.cce.collector.api.exception.FhirValidationException;
-import org.openphc.cce.collector.api.exception.UnknownSourceException;
 import org.openphc.cce.collector.domain.model.EventLog;
 import org.openphc.cce.collector.domain.model.InboundEvent;
 import org.openphc.cce.collector.domain.model.enums.InboundStatus;
@@ -37,10 +36,8 @@ public class EventIngestionService {
     private final DeduplicationService deduplicationService;
     private final EventPublisher eventPublisher;
     private final DeadLetterService deadLetterService;
-    private final SourceRegistrationService sourceRegistrationService;
     private final InboundEventRepository inboundEventRepository;
     private final EventLogRepository eventLogRepository;
-    private final boolean sourceAllowlisting;
     private final String inboundTopic;
 
     // Metrics
@@ -54,10 +51,8 @@ public class EventIngestionService {
             DeduplicationService deduplicationService,
             EventPublisher eventPublisher,
             DeadLetterService deadLetterService,
-            SourceRegistrationService sourceRegistrationService,
             InboundEventRepository inboundEventRepository,
             EventLogRepository eventLogRepository,
-            @Value("${cce.collector.source-allowlisting:false}") boolean sourceAllowlisting,
             @Value("${cce.kafka.topics.inbound}") String inboundTopic,
             MeterRegistry meterRegistry) {
         this.cloudEventValidator = cloudEventValidator;
@@ -66,10 +61,8 @@ public class EventIngestionService {
         this.deduplicationService = deduplicationService;
         this.eventPublisher = eventPublisher;
         this.deadLetterService = deadLetterService;
-        this.sourceRegistrationService = sourceRegistrationService;
         this.inboundEventRepository = inboundEventRepository;
         this.eventLogRepository = eventLogRepository;
-        this.sourceAllowlisting = sourceAllowlisting;
         this.inboundTopic = inboundTopic;
         this.meterRegistry = meterRegistry;
         this.ingestionTimer = Timer.builder("cce.collector.ingestion.duration")
@@ -103,32 +96,21 @@ public class EventIngestionService {
             throw e;
         }
 
-        // Step 3: Source validation (if allowlisting is enabled)
-        if (sourceAllowlisting && !sourceRegistrationService.isSourceAllowed(request.getSource())) {
-            recordMetric(request.getSource(), "rejected");
-            deadLetterService.persistValidationFailure(
-                    null, request.getId(), request.getSource(), request.getType(),
-                    request.getSubject(), request.toRawPayload(),
-                    RejectionReason.UNKNOWN_SOURCE, "Source not registered or inactive",
-                    request.getCorrelationid(), request.getFacilityid());
-            throw new UnknownSourceException(request.getSource());
-        }
-
-        // Step 4: Deduplication check (before DB persist to avoid constraint violations)
+        // Step 3: Deduplication check (before DB persist to avoid constraint violations)
         if (deduplicationService.isDuplicate(request.getSource(), request.getId())) {
             recordMetric(request.getSource(), "duplicate");
             return buildDuplicateResponse(request, receivedAt);
         }
 
-        // Step 5: Persist raw inbound event
+        // Step 4: Persist raw inbound event
         InboundEvent inboundEvent = persistInboundEvent(request, receivedAt);
 
-        // Step 6: Normalization
+        // Step 5: Normalization
         String normalizedType = eventNormalizer.normalizeEventType(request.getType());
         String correlationId = eventNormalizer.ensureCorrelationId(request.getCorrelationid());
         OffsetDateTime eventTime = eventNormalizer.ensureEventTime(request.getTime());
 
-        // Step 7: FHIR payload validation
+        // Step 6: FHIR payload validation
         try {
             fhirPayloadValidator.validate(request);
         } catch (FhirValidationException e) {
@@ -144,15 +126,15 @@ public class EventIngestionService {
             throw e;
         }
 
-        // Step 8: Update inbound event status to accepted
+        // Step 7: Update inbound event status to accepted
         inboundEvent.setStatus(InboundStatus.ACCEPTED);
         inboundEventRepository.save(inboundEvent);
 
-        // Step 9: Persist normalized event to event_log (outbox)
+        // Step 8: Persist normalized event to event_log (outbox)
         EventLog eventLog = persistEventLog(request, inboundEvent, normalizedType,
                 correlationId, eventTime, receivedAt);
 
-        // Step 10: Publish to Kafka
+        // Step 9: Publish to Kafka
         try {
             eventPublisher.publish(eventLog);
         } catch (Exception e) {
@@ -166,7 +148,7 @@ public class EventIngestionService {
 
         recordMetric(request.getSource(), "accepted");
 
-        // Step 12: Return HTTP response
+        // Step 10: Return HTTP response
         return EventIngestionResponse.builder()
                 .eventId(request.getId())
                 .status("accepted")

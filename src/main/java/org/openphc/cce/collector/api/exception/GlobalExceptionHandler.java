@@ -34,13 +34,6 @@ public class GlobalExceptionHandler {
                         Map.of("errors", ex.getErrors())));
     }
 
-    @ExceptionHandler(UnknownSourceException.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnknownSource(UnknownSourceException ex) {
-        log.warn("Unknown source: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error("UNKNOWN_SOURCE", ex.getMessage()));
-    }
-
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleBeanValidation(MethodArgumentNotValidException ex) {
         String errors = ex.getBindingResult().getFieldErrors().stream()

@@ -12,7 +12,6 @@ spring:
 
 cce:
   collector:
-    source-allowlisting: false
     fhir-validation:
       enabled: true
       strict-mode: false

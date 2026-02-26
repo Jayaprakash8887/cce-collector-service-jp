@@ -97,7 +97,6 @@ curl -X POST http://localhost:8080/v1/events \
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/v1/events` | Ingest a single CloudEvents event |
-| POST | `/v1/events/batch` | Ingest a batch of events (max 100) |
 
 ### Dead Letter Management
 

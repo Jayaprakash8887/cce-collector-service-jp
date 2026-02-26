@@ -30,11 +30,6 @@ spring:
         max.in.flight.requests.per.connection: 5
         linger.ms: 5
         batch.size: 16384
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-
 cce:
   kafka:
     topics:
@@ -42,14 +37,12 @@ cce:
       dead-letter: cce.deadletter
   collector:
     max-payload-size: 1048576
-    max-batch-size: 100
-    max-batch-payload-size: 10485760
     source-allowlisting: false
     fhir-validation:
       enabled: true
       strict-mode: false
     dedup:
-      redis-enabled: true
+      lookback-days: 30
     outbox:
       retry-interval-seconds: 30
       retry-max-age-minutes: 60

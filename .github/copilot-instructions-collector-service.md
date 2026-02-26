@@ -153,7 +153,6 @@ cce-collector-service/
 │   │   │   ├── api/
 │   │   │   │   ├── controller/
 │   │   │   │   │   ├── EventIngestionController.java  # POST /v1/events — main entry point
-│   │   │   │   │   ├── EventBatchController.java      # POST /v1/events/batch — batch ingestion
 │   │   │   │   │   ├── DeadLetterController.java      # GET /v1/dead-letters — view rejected
 │   │   │   │   │   └── SourceController.java          # CRUD for registered sources
 │   │   │   │   ├── dto/
@@ -161,8 +160,6 @@ cce-collector-service/
 │   │   │   │   │   ├── ApiError.java                  # { "error": { "code", "message" } }
 │   │   │   │   │   ├── EventIngestionRequest.java     # CloudEvents envelope (inbound DTO)
 │   │   │   │   │   ├── EventIngestionResponse.java    # Accepted/rejected receipt
-│   │   │   │   │   ├── BatchIngestionRequest.java     # Array of events
-│   │   │   │   │   ├── BatchIngestionResponse.java    # Per-event status array
 │   │   │   │   │   └── DeadLetterDto.java
 │   │   │   │   └── exception/
 │   │   │   │       └── GlobalExceptionHandler.java
@@ -361,7 +358,6 @@ The Collector Service exposes its ingestion API to external systems. In producti
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/v1/events` | API Key / mTLS | Ingest a single clinical event (CloudEvents envelope) |
-| POST | `/v1/events/batch` | API Key / mTLS | Ingest a batch of clinical events (array of CloudEvents) |
 
 ### Dead Letter Management
 
@@ -392,19 +388,6 @@ The Collector Service exposes its ingestion API to external systems. In producti
     "correlationId": "corr-abc-123-def-456",
     "publishedTopic": "cce.events.inbound",
     "receivedAt": "2026-03-15T10:30:01Z"
-  }
-}
-
-// Success — batch
-{
-  "data": {
-    "total": 5,
-    "accepted": 4,
-    "rejected": 1,
-    "results": [
-      { "eventId": "evt-001", "status": "accepted" },
-      { "eventId": "evt-002", "status": "rejected", "reason": "invalid_fhir", "details": "..." }
-    ]
   }
 }
 
@@ -538,20 +521,6 @@ Per the CloudEvents specification, extension attribute names are `lowercase` wit
        + persist to dead_letter_event (failure_stage = 'kafka_publish')
 11. Set Redis idempotency key: SET idempotency:{source}:{cloudevents_id} 1 EX 86400
 12. Return HTTP response with ingestion receipt
-```
-
-### Batch Ingestion
-
-```
-1. Receive HTTP POST → parse array of CloudEvents
-2. Validate batch size (max 100 events per batch)
-3. For each event in batch:
-   a. Run steps 2-7 from single event flow (validate, persist raw, dedup, normalize, FHIR validate)
-   b. Collect per-event validation results
-4. Persist all accepted events: batch insert into inbound_event + event_log
-5. Publish accepted event_log records to Kafka (batch send with transactional producer)
-6. Set Redis idempotency keys for all published events
-7. Return batch response with per-event status
 ```
 
 ### Kafka Publish Contract
@@ -877,7 +846,6 @@ Per-source rate limiting to prevent a single source from overwhelming the system
 |-------------|---------------|--------|
 | openHIM mediator | 1000 events/min | 1 minute sliding |
 | Direct EMR integration | 200 events/min | 1 minute sliding |
-| Batch endpoint | 10 batches/min (100 events each) | 1 minute sliding |
 
 Rate limits are configurable per source via `source_registration.allowed_types` or a dedicated config.
 
@@ -916,23 +884,7 @@ Gauge.builder("cce.collector.deadletters.active", deadLetterRepository, r -> r.c
 Timer.builder("cce.collector.ingestion.duration")
     .register(meterRegistry);
 
-// Batch sizes
-DistributionSummary.builder("cce.collector.batch.size")
-    .register(meterRegistry);
-```
-
-### Logging Standards
-
-- Use structured JSON logging (Logback + logstash-encoder)
-- Always include `correlation_id` in MDC for every request
-- Log at INFO: event received, validation passed, published to Kafka
-- Log at WARN: duplicate events, FHIR validation warnings, rate limit approached
-- Log at ERROR: FHIR validation failure, Kafka publish failure, dead-lettered events
-- Include `source`, `event_id`, `subject`, `facility_id` in structured log fields where available
-
-### Health Checks
-
-Expose via Spring Boot Actuator:
+// Event ingestion latency (end-to-end: receive → publish)
 - `/actuator/health` — includes Kafka producer, PostgreSQL, Redis connectivity
 - `/actuator/health/liveness` — basic liveness (JVM is running)
 - `/actuator/health/readiness` — readiness (Kafka producer connected, DB accessible)
@@ -978,15 +930,6 @@ public class EventIngestionController {
             MDC.clear();
         }
     }
-
-    @PostMapping("/batch")
-    public ResponseEntity<ApiResponse<BatchIngestionResponse>> ingestBatch(
-            @Valid @RequestBody BatchIngestionRequest request) {
-        BatchIngestionResponse response = ingestionService.ingestBatch(request.getEvents());
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
-            .body(ApiResponse.success(response));
-    }
-}
 ```
 
 ### Transaction Boundaries
@@ -1006,7 +949,7 @@ public class EventIngestionController {
 - `400 VALIDATION_ERROR` — invalid CloudEvents envelope, missing required fields
 - `401 UNAUTHORIZED` — missing or invalid API key
 - `403 FORBIDDEN` — source not registered or inactive
-- `413 PAYLOAD_TOO_LARGE` — request body exceeds max size (1 MB default for single, 10 MB for batch)
+- `413 PAYLOAD_TOO_LARGE` — request body exceeds max size (1 MB)
 - `422 UNPROCESSABLE_ENTITY` — FHIR payload validation failure
 - `429 TOO_MANY_REQUESTS` — rate limit exceeded
 - `500 INTERNAL_SERVER_ERROR` — unexpected failures
@@ -1027,7 +970,6 @@ public class EventIngestionController {
 ### Integration Tests
 - Use **Testcontainers** for PostgreSQL, Kafka, and Redis
 - Test full ingestion flow: HTTP POST → validation → DB persist → Kafka publish → verify message on topic
-- Test batch ingestion: mixed valid/invalid events, partial acceptance
 - Test deduplication: submit same event twice, verify idempotent response
 - Test dead-lettering: invalid events persisted with correct rejection reasons
 
@@ -1039,7 +981,7 @@ public class EventIngestionController {
 
 ### Test Fixtures
 - Maintain sample CloudEvents JSON files in `src/test/resources/fixtures/`
-- Include: valid encounter event, valid observation event, invalid envelope (missing type), invalid FHIR payload, duplicate event, batch with mixed valid/invalid
+- Include: valid encounter event, valid observation event, invalid envelope (missing type), invalid FHIR payload, duplicate event
 - Reference sample events from `artifacts/sample-kafka-events-ebuzima-visit.json` and `artifacts/sample-kafka-events-rhie.json` for realistic test data
 
 ---
@@ -1088,8 +1030,6 @@ cce:
       dead-letter: cce.deadletter
   collector:
     max-payload-size: 1048576          # 1 MB for single event
-    max-batch-size: 100                # Max events per batch
-    max-batch-payload-size: 10485760   # 10 MB for batch
     source-allowlisting: false         # Set true to enforce source registration
     fhir-validation:
       enabled: true

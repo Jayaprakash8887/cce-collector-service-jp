@@ -9,10 +9,6 @@ spring:
     show-sql: true
   kafka:
     bootstrap-servers: localhost:9092
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 cce:
   collector:
@@ -21,7 +17,7 @@ cce:
       enabled: true
       strict-mode: false
     dedup:
-      redis-enabled: true
+      lookback-days: 30
 
 logging:
   level:

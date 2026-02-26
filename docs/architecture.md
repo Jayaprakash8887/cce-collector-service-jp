@@ -115,7 +115,6 @@ org.openphc.cce.collector/
 ├── api/
 │   ├── controller/
 │   │   ├── EventIngestionController.java  #   POST /v1/events
-│   │   ├── EventBatchController.java      #   POST /v1/events/batch
 │   │   ├── DeadLetterController.java      #   Dead-letter CRUD
 │   │   └── SourceController.java          #   Source registration CRUD
 │   ├── dto/                               # Request/response data transfer objects
@@ -123,8 +122,6 @@ org.openphc.cce.collector/
 │   │   ├── ApiError.java                  #   { "error": { "code", "message" } }
 │   │   ├── EventIngestionRequest.java     #   CloudEvents envelope (inbound DTO)
 │   │   ├── EventIngestionResponse.java    #   Accepted/rejected receipt
-│   │   ├── BatchIngestionRequest.java     #   Array of events
-│   │   ├── BatchIngestionResponse.java    #   Per-event status array
 │   │   ├── CloudEventMessage.java         #   Kafka message DTO (camelCase fields)
 │   │   ├── DeadLetterDto.java             #   Dead-letter response DTO
 │   │   └── SourceRegistrationDto.java     #   Source registration request DTO
@@ -177,14 +174,6 @@ org.openphc.cce.collector/
 11. Set Redis idempotency key (24h TTL)
 12. Return HTTP 202 Accepted with ingestion receipt
 ```
-
-### Batch Ingestion Flow
-
-1. Parse array of CloudEvents (max 100 per batch)
-2. For each event: run steps 2–7 from single flow, collect per-event results
-3. Persist accepted events (inbound_event + event_log)
-4. Publish accepted events to Kafka
-5. Return batch response with per-event status
 
 ## 7. Database Schema
 

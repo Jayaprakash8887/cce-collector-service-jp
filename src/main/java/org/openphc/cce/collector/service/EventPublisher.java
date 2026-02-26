@@ -28,7 +28,6 @@ public class EventPublisher {
 
     private final InboundEventProducer inboundEventProducer;
     private final EventLogRepository eventLogRepository;
-    private final DeduplicationService deduplicationService;
 
     @Value("${cce.collector.outbox.retry-max-age-minutes:60}")
     private int retryMaxAgeMinutes;
@@ -52,9 +51,6 @@ public class EventPublisher {
             eventLog.setKafkaPartition(metadata.partition());
             eventLog.setKafkaOffset(metadata.offset());
             eventLogRepository.save(eventLog);
-
-            // Set Redis idempotency key
-            deduplicationService.markAsProcessed(eventLog.getSource(), eventLog.getCloudeventsId());
 
             return message;
         } catch (Exception e) {

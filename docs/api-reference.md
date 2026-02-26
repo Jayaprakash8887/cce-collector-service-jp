@@ -135,76 +135,6 @@ Ingest a single CloudEvents-formatted clinical event.
 
 ---
 
-### POST /v1/events/batch
-
-Ingest multiple CloudEvents in a single request.
-
-**Content-Type:** `application/json`
-
-#### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `events` | `array` | Yes | Array of CloudEvents objects (max 100) |
-
-#### Example Request
-
-```json
-{
-  "events": [
-    {
-      "specversion": "1.0",
-      "id": "evt-001",
-      "source": "ebuzima/kigali-south",
-      "type": "cce.encounter.created",
-      "subject": "patient/UPI-RW-2024-000001",
-      "datacontenttype": "application/fhir+json",
-      "data": { "resourceType": "Encounter", "status": "finished" }
-    },
-    {
-      "specversion": "1.0",
-      "id": "evt-002",
-      "source": "ebuzima/kigali-south",
-      "type": "cce.observation.created",
-      "subject": "patient/UPI-RW-2024-000001",
-      "datacontenttype": "application/fhir+json",
-      "data": { "resourceType": "Observation", "status": "final" }
-    }
-  ]
-}
-```
-
-#### Responses
-
-**200 OK** — Batch processed (individual statuses in response)
-
-```json
-{
-  "data": {
-    "total": 2,
-    "accepted": 2,
-    "rejected": 0,
-    "duplicate": 0,
-    "results": [
-      {
-        "eventId": "evt-001",
-        "status": "accepted",
-        "correlationId": "corr-gen-uuid-1",
-        "timestamp": "2025-01-15T09:30:05Z"
-      },
-      {
-        "eventId": "evt-002",
-        "status": "accepted",
-        "correlationId": "corr-gen-uuid-2",
-        "timestamp": "2025-01-15T09:30:05Z"
-      }
-    ]
-  }
-}
-```
-
----
-
 ## 2. Dead Letter Management
 
 ### GET /v1/dead-letters
@@ -419,7 +349,6 @@ The service performs field name translation between the HTTP inbound format and 
 
 | Constraint | Value |
 |-----------|-------|
-| Max batch size | 100 events |
 | Max event ID length | 256 characters |
 | Redis idempotency TTL | 24 hours |
 | Kafka publish retries | 3 |

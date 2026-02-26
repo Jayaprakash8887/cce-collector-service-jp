@@ -5,6 +5,7 @@ import org.openphc.cce.collector.domain.model.enums.InboundStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,6 +15,8 @@ public interface InboundEventRepository extends JpaRepository<InboundEvent, UUID
     Optional<InboundEvent> findByCloudeventsIdAndSource(String cloudeventsId, String source);
 
     boolean existsByCloudeventsIdAndSource(String cloudeventsId, String source);
+
+    boolean existsByCloudeventsIdAndSourceAndReceivedAtAfter(String cloudeventsId, String source, OffsetDateTime since);
 
     long countByStatus(InboundStatus status);
 }

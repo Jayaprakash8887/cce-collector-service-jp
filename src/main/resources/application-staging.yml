@@ -8,10 +8,6 @@ spring:
       minimum-idle: 3
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS}
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT:6379}
 
 cce:
   collector:

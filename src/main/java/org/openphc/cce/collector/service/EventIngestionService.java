@@ -85,43 +85,6 @@ public class EventIngestionService {
     }
 
     /**
-     * Ingest a batch of clinical events.
-     */
-    public BatchIngestionResponse ingestBatch(List<EventIngestionRequest> events) {
-        List<EventIngestionResponse> results = new ArrayList<>();
-        int accepted = 0;
-        int rejected = 0;
-
-        for (EventIngestionRequest event : events) {
-            try {
-                EventIngestionResponse response = doIngest(event);
-                results.add(response);
-                if ("rejected".equals(response.getStatus())) {
-                    rejected++;
-                } else {
-                    accepted++;
-                }
-            } catch (Exception e) {
-                rejected++;
-                results.add(EventIngestionResponse.builder()
-                        .eventId(event.getId())
-                        .status("rejected")
-                        .reason(e.getClass().getSimpleName())
-                        .details(e.getMessage())
-                        .receivedAt(OffsetDateTime.now(ZoneOffset.UTC))
-                        .build());
-            }
-        }
-
-        return BatchIngestionResponse.builder()
-                .total(events.size())
-                .accepted(accepted)
-                .rejected(rejected)
-                .results(results)
-                .build();
-    }
-
-    /**
      * Core ingestion logic for a single event.
      */
     private EventIngestionResponse doIngest(EventIngestionRequest request) {
@@ -151,16 +114,14 @@ public class EventIngestionService {
             throw new UnknownSourceException(request.getSource());
         }
 
-        // Step 4: Persist raw inbound event
-        InboundEvent inboundEvent = persistInboundEvent(request, receivedAt);
-
-        // Step 5: Deduplication check
-        if (deduplicationService.isDuplicateViaRedis(request.getSource(), request.getId())) {
-            inboundEvent.setStatus(InboundStatus.DUPLICATE);
-            inboundEventRepository.save(inboundEvent);
+        // Step 4: Deduplication check (before DB persist to avoid constraint violations)
+        if (deduplicationService.isDuplicate(request.getSource(), request.getId())) {
             recordMetric(request.getSource(), "duplicate");
             return buildDuplicateResponse(request, receivedAt);
         }
+
+        // Step 5: Persist raw inbound event
+        InboundEvent inboundEvent = persistInboundEvent(request, receivedAt);
 
         // Step 6: Normalization
         String normalizedType = eventNormalizer.normalizeEventType(request.getType());

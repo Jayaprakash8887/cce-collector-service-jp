@@ -1,81 +1,45 @@
 package org.openphc.cce.collector.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.openphc.cce.collector.domain.repository.InboundEventRepository;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 /**
- * Two-layer deduplication: Redis fast-path (24h TTL) + PostgreSQL unique constraints (permanent).
+ * Deduplication via PostgreSQL.
+ * Checks the inbound_event table for existing records within a configurable lookback window.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class DeduplicationService {
 
-    private static final String KEY_PREFIX = "idempotency:";
-    private static final Duration DEFAULT_TTL = Duration.ofHours(24);
-
-    private final StringRedisTemplate redisTemplate;
     private final InboundEventRepository inboundEventRepository;
+    private final int lookbackDays;
 
-    @Value("${cce.collector.dedup.redis-enabled:true}")
-    private boolean redisEnabled;
-
-    /**
-     * Check if event is a duplicate via Redis fast-path.
-     *
-     * @return true if duplicate detected in Redis
-     */
-    public boolean isDuplicateViaRedis(String source, String cloudeventsId) {
-        if (!redisEnabled) {
-            return false;
-        }
-        try {
-            String key = buildKey(source, cloudeventsId);
-            Boolean exists = redisTemplate.hasKey(key);
-            if (Boolean.TRUE.equals(exists)) {
-                log.info("Duplicate detected via Redis: source={}, id={}", source, cloudeventsId);
-                return true;
-            }
-        } catch (Exception e) {
-            log.warn("Redis dedup check failed, falling back to DB: {}", e.getMessage());
-        }
-        return false;
+    public DeduplicationService(
+            InboundEventRepository inboundEventRepository,
+            @Value("${cce.collector.dedup.lookback-days:30}") int lookbackDays) {
+        this.inboundEventRepository = inboundEventRepository;
+        this.lookbackDays = lookbackDays;
+        log.info("Deduplication configured with lookback window of {} days", lookbackDays);
     }
 
     /**
-     * Check if event is a duplicate via PostgreSQL (authoritative).
+     * Check if an event with the same (cloudeventsId, source) already exists
+     * within the configured lookback window.
+     *
+     * @return true if a duplicate is found in the database
      */
-    public boolean isDuplicateViaDb(String source, String cloudeventsId) {
-        boolean exists = inboundEventRepository.existsByCloudeventsIdAndSource(cloudeventsId, source);
+    public boolean isDuplicate(String source, String cloudeventsId) {
+        OffsetDateTime since = OffsetDateTime.now(ZoneOffset.UTC).minusDays(lookbackDays);
+        boolean exists = inboundEventRepository.existsByCloudeventsIdAndSourceAndReceivedAtAfter(
+                cloudeventsId, source, since);
         if (exists) {
-            log.info("Duplicate detected via DB: source={}, id={}", source, cloudeventsId);
+            log.info("Duplicate detected: source={}, id={}, lookbackDays={}", source, cloudeventsId, lookbackDays);
         }
         return exists;
-    }
-
-    /**
-     * Mark an event as processed in Redis (set idempotency key with 24h TTL).
-     */
-    public void markAsProcessed(String source, String cloudeventsId) {
-        if (!redisEnabled) {
-            return;
-        }
-        try {
-            String key = buildKey(source, cloudeventsId);
-            redisTemplate.opsForValue().set(key, "1", DEFAULT_TTL);
-            log.debug("Set Redis idempotency key: {}", key);
-        } catch (Exception e) {
-            log.warn("Failed to set Redis idempotency key: {}", e.getMessage());
-        }
-    }
-
-    private String buildKey(String source, String cloudeventsId) {
-        return KEY_PREFIX + source + ":" + cloudeventsId;
     }
 }

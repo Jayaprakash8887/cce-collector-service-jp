@@ -88,7 +88,6 @@ org.openphc.cce.collector/
 │   │   ├── InboundEvent.java              #   Raw inbound request record (audit/dedup)
 │   │   ├── EventLog.java                  #   Normalized event outbox (Kafka publish source)
 │   │   ├── DeadLetterEvent.java           #   Rejected/failed event record
-│   │   ├── SourceRegistration.java        #   Registered event sources
 │   │   └── enums/
 │   │       ├── InboundStatus.java         #   RECEIVED, ACCEPTED, REJECTED, DUPLICATE
 │   │       ├── PublishStatus.java         #   PENDING, PUBLISHED, FAILED
@@ -97,8 +96,7 @@ org.openphc.cce.collector/
 │   └── repository/                        # Spring Data JPA repositories
 │       ├── InboundEventRepository.java
 │       ├── EventLogRepository.java
-│       ├── DeadLetterEventRepository.java
-│       └── SourceRegistrationRepository.java
+│       └── DeadLetterEventRepository.java
 ├── service/                               # Core business logic
 │   ├── EventIngestionService.java         #   Main orchestrator: validate → normalize → persist → publish
 │   ├── CloudEventValidator.java           #   CloudEvents v1.0 envelope validation
@@ -106,29 +104,25 @@ org.openphc.cce.collector/
 │   ├── EventNormalizer.java               #   Type normalization, correlation ID, time fill
 │   ├── DeduplicationService.java          #   DB dedup with configurable lookback window
 │   ├── EventPublisher.java                #   Outbox publisher + scheduled retry
-│   ├── SourceRegistrationService.java     #   Source CRUD + API key validation
 │   └── DeadLetterService.java             #   Dead-letter persistence and query
 ├── kafka/
 │   └── InboundEventProducer.java          # Kafka publish to cce.events.inbound
 ├── api/
 │   ├── controller/
 │   │   ├── EventIngestionController.java  #   POST /v1/events
-│   │   ├── DeadLetterController.java      #   Dead-letter CRUD
-│   │   └── SourceController.java          #   Source registration CRUD
+│   │   └── DeadLetterController.java      #   Dead-letter CRUD
 │   ├── dto/                               # Request/response data transfer objects
 │   │   ├── ApiResponse.java               #   { "data": ... } envelope
 │   │   ├── ApiError.java                  #   { "error": { "code", "message" } }
 │   │   ├── EventIngestionRequest.java     #   CloudEvents envelope (inbound DTO)
 │   │   ├── EventIngestionResponse.java    #   Accepted/rejected receipt
 │   │   ├── CloudEventMessage.java         #   Kafka message DTO (camelCase fields)
-│   │   ├── DeadLetterDto.java             #   Dead-letter response DTO
-│   │   └── SourceRegistrationDto.java     #   Source registration request DTO
+│   │   └── DeadLetterDto.java             #   Dead-letter response DTO
 │   └── exception/
 │       ├── GlobalExceptionHandler.java    #   @ControllerAdvice centralized error handling
 │       ├── CloudEventValidationException.java
 │       ├── FhirValidationException.java
 │       ├── KafkaPublishException.java
-│       ├── UnknownSourceException.java
 │       └── DuplicateEventException.java
 └── fhir/
     ├── FhirResourceParser.java            # HAPI FHIR parse + type detection
@@ -146,42 +140,38 @@ org.openphc.cce.collector/
     b. specversion must be "1.0"
     c. subject must be non-empty (patient UPID required by CCE)
     d. If validation fails → 400 + persist to dead_letter_event
- 3. Source Validation (if source allowlisting enabled)
-    a. Check source_registration table: source is registered AND active
-    b. If unknown/inactive → 403 + persist to dead_letter_event
- 4. Persist to inbound_event (status = 'RECEIVED', raw_payload = original body)
- 5. Deduplication Check
+ 3. Deduplication Check
     a. Query PostgreSQL: check if (source, cloudevents_id) exists within lookback window
        - If exists → update status = 'DUPLICATE', return 200 (idempotent)
     b. If not found → proceed (DB unique constraint is authoritative)
- 6. Normalization
+ 4. Persist to inbound_event (status = 'RECEIVED', raw_payload = original body)
+ 5. Normalization
     a. Normalize event type to org.openphc.cce.* pattern
     b. Generate correlationid if absent (UUID with "corr-" prefix)
     c. Fill time with server received_at if absent
- 7. FHIR Payload Validation (if datacontenttype = application/fhir+json)
+ 6. FHIR Payload Validation (if datacontenttype = application/fhir+json)
     a. Parse data via HAPI FHIR
     b. Validate resourceType is present and parseable
     c. Cross-check subject reference (warning only)
     d. If invalid → status = 'REJECTED', dead-letter, return 422
- 8. Update inbound_event.status = 'ACCEPTED'
- 9. Persist normalized event to event_log (publish_status = 'PENDING')
-10. Publish event_log record to Kafka
+ 7. Update inbound_event.status = 'ACCEPTED'
+ 8. Persist normalized event to event_log (publish_status = 'PENDING')
+ 9. Publish event_log record to Kafka
     a. Key = subject (patient_id) — per-patient ordering
     b. On success: update publish_status = 'PUBLISHED', record Kafka metadata
     c. On failure: stays 'PENDING'/'FAILED', dead-letter created
-11. Return HTTP 202 Accepted with ingestion receipt
+10. Return HTTP 202 Accepted with ingestion receipt
 ```
 
 ## 7. Database Schema
 
-Four tables owned by this service, managed by Flyway:
+Three tables owned by this service, managed by Flyway:
 
 | Table | Purpose | Partitioned |
 |-------|---------|-------------|
 | `inbound_event` | Raw request audit log; primary dedup via `UNIQUE(cloudevents_id, source)` | No |
 | `event_log` | Normalized event outbox for Kafka; monthly-partitioned by `received_at` | Yes (RANGE) |
 | `dead_letter_event` | Rejected/failed events with retry support | No |
-| `source_registration` | Registered event sources for allowlisting | No |
 
 ### Entity Relationship
 

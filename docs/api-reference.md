@@ -111,17 +111,6 @@ Ingest a single CloudEvents-formatted clinical event.
 }
 ```
 
-**403 Forbidden** — Unknown/inactive source
-
-```json
-{
-  "error": {
-    "code": "UNKNOWN_SOURCE",
-    "message": "Source not registered or inactive: ebuzima/unknown-facility"
-  }
-}
-```
-
 **422 Unprocessable Entity** — FHIR payload validation failure
 
 ```json
@@ -203,57 +192,7 @@ Retry processing a dead-letter event.
 
 ---
 
-## 3. Source Registration
-
-### POST /v1/sources
-
-Register a new event source.
-
-#### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `sourceIdentifier` | `string` | Yes | Unique source URI (e.g., `ebuzima/kigali-south`) |
-| `displayName` | `string` | Yes | Human-readable name |
-| `apiKeyHash` | `string` | No | SHA-256 hash of the source API key |
-| `allowedEventTypes` | `string` | No | Comma-separated allowed event types |
-| `active` | `boolean` | No | Whether source is active (default: true) |
-
-#### Response
-
-**201 Created**
-
-```json
-{
-  "data": {
-    "id": "uuid-source-001",
-    "sourceIdentifier": "ebuzima/kigali-south",
-    "displayName": "eBUZIMA - Kigali South",
-    "active": true,
-    "createdAt": "2025-01-15T09:00:00Z"
-  }
-}
-```
-
-### GET /v1/sources
-
-List all registered sources.
-
-### GET /v1/sources/{id}
-
-Get a source by ID.
-
-### PUT /v1/sources/{id}
-
-Update a source registration.
-
-### DELETE /v1/sources/{id}
-
-Delete a source registration.
-
----
-
-## 4. Health & Actuator Endpoints
+## 3. Health & Actuator Endpoints
 
 Standard Spring Boot Actuator endpoints:
 
@@ -268,7 +207,7 @@ Standard Spring Boot Actuator endpoints:
 
 ---
 
-## 5. Response Envelopes
+## 4. Response Envelopes
 
 ### Success Envelope (`ApiResponse`)
 
@@ -294,7 +233,6 @@ Standard Spring Boot Actuator endpoints:
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `VALIDATION_ERROR` | 400 | CloudEvents envelope validation failed |
-| `UNKNOWN_SOURCE` | 403 | Unregistered or inactive event source |
 | `FHIR_VALIDATION_ERROR` | 422 | FHIR payload failed structural validation |
 | `DUPLICATE_EVENT` | 200 | Event already received (idempotent) |
 | `KAFKA_PUBLISH_ERROR` | 500 | Failed to publish to Kafka (event persisted, retry pending) |
@@ -304,7 +242,7 @@ Standard Spring Boot Actuator endpoints:
 
 ---
 
-## 6. CloudEvents Field Name Conventions
+## 5. CloudEvents Field Name Conventions
 
 The service performs field name translation between the HTTP inbound format and the Kafka outbound format:
 
@@ -321,7 +259,7 @@ The service performs field name translation between the HTTP inbound format and 
 
 ---
 
-## 7. Validation Rules Summary
+## 6. Validation Rules Summary
 
 ### CloudEvents Envelope
 
@@ -345,7 +283,7 @@ The service performs field name translation between the HTTP inbound format and 
 
 ---
 
-## 8. Rate Limits & Constraints
+## 7. Rate Limits & Constraints
 
 | Constraint | Value |
 |-----------|-------|

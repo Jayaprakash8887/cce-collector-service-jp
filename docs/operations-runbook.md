@@ -203,7 +203,6 @@ WHERE source = 'ebuzima/broken-facility'
 | `MISSING_REQUIRED_FIELD` | CCE-required field (e.g., subject) missing | Fix source system to include patient UPID |
 | `INVALID_SPEC_VERSION` | specversion is not "1.0" | Fix source system |
 | `INVALID_FHIR` | FHIR R4 payload cannot be parsed | Fix FHIR resource in source system |
-| `UNKNOWN_SOURCE` | Source not registered or inactive | Register source via `/v1/sources` |
 | `KAFKA_PUBLISH_FAILED` | Kafka broker unreachable | Check Kafka cluster health |
 | `PROCESSING_ERROR` | Unexpected error during processing | Check application logs |
 | `DUPLICATE` | Not typically dead-lettered — handled as idempotent | N/A |
@@ -247,50 +246,7 @@ export CCE_COLLECTOR_OUTBOX_MAX_RETRY_BATCH_SIZE=500
 
 ---
 
-## 5. Source Registration
-
-### Register a New Source
-
-```bash
-curl -X POST http://localhost:8080/v1/sources \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceIdentifier": "smartcare/lusaka-central",
-    "displayName": "SmartCare - Lusaka Central",
-    "active": true
-  }'
-```
-
-### Deactivate a Source
-
-```bash
-# Get source ID first
-curl http://localhost:8080/v1/sources | jq '.data[] | {id, sourceIdentifier, active}'
-
-# Update to inactive
-curl -X PUT http://localhost:8080/v1/sources/{id} \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceIdentifier": "smartcare/lusaka-central",
-    "displayName": "SmartCare - Lusaka Central",
-    "active": false
-  }'
-```
-
-### Enable Source Allowlisting
-
-Source validation is disabled by default. To enable:
-
-```bash
-# Via environment variable
-export CCE_COLLECTOR_SOURCE_VALIDATION_ENABLED=true
-```
-
-When enabled, events from unregistered or inactive sources are **rejected with HTTP 403** and dead-lettered with reason `UNKNOWN_SOURCE`.
-
----
-
-## 6. Database Maintenance
+## 5. Database Maintenance
 
 ### Partition Management
 
@@ -323,7 +279,7 @@ SELECT
   pg_size_pretty(pg_relation_size(oid)) AS data_size,
   pg_size_pretty(pg_indexes_size(oid)) AS index_size
 FROM pg_class
-WHERE relname IN ('inbound_event', 'event_log', 'dead_letter_event', 'source_registration')
+WHERE relname IN ('inbound_event', 'event_log', 'dead_letter_event')
 ORDER BY pg_total_relation_size(oid) DESC;
 ```
 
@@ -341,7 +297,7 @@ DELETE FROM inbound_event WHERE received_at < NOW() - INTERVAL '90 days';
 
 ---
 
-## 7. Troubleshooting
+## 6. Troubleshooting
 
 ### Event Not Reaching Kafka
 
@@ -431,7 +387,7 @@ DELETE FROM inbound_event WHERE received_at < NOW() - INTERVAL '90 days';
 
 ---
 
-## 8. Log Analysis
+## 7. Log Analysis
 
 ### Log Format
 
@@ -482,7 +438,7 @@ The following MDC fields are set per-request for correlation:
 
 ---
 
-## 9. Emergency Procedures
+## 8. Emergency Procedures
 
 ### Kafka Total Outage
 

@@ -105,16 +105,6 @@ curl -X POST http://localhost:8080/v1/events \
 | GET | `/v1/dead-letters/{id}` | Get specific dead-letter |
 | POST | `/v1/dead-letters/{id}/retry` | Re-process a dead-letter |
 
-### Source Registration
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/sources` | Register a new event source |
-| GET | `/v1/sources` | List registered sources |
-| GET | `/v1/sources/{id}` | Get source details |
-| PUT | `/v1/sources/{id}` | Update source |
-| DELETE | `/v1/sources/{id}` | Deactivate source |
-
 ### Health & Observability
 
 | Path | Description |
@@ -128,21 +118,19 @@ curl -X POST http://localhost:8080/v1/events \
 
 1. **Receive** HTTP POST with CloudEvents envelope
 2. **Validate** CloudEvents envelope (specversion, id, source, type, subject, data)
-3. **Validate source** (if allowlisting enabled)
+3. **Deduplicate** via PostgreSQL with configurable lookback window + DB unique constraints
 4. **Persist** raw event to `inbound_event` table (audit trail)
-5. **Deduplicate** via PostgreSQL with configurable lookback window + DB unique constraints
-6. **Normalize** event type, correlation ID, timestamps
-7. **Validate FHIR** payload (if `datacontenttype = application/fhir+json`)
-8. **Persist** normalized event to `event_log` table (outbox)
-9. **Publish** to Kafka topic `cce.events.inbound`
-10. **Return** ingestion receipt
+5. **Normalize** event type, correlation ID, timestamps
+6. **Validate FHIR** payload (if `datacontenttype = application/fhir+json`)
+7. **Persist** normalized event to `event_log` table (outbox)
+8. **Publish** to Kafka topic `cce.events.inbound`
+9. **Return** ingestion receipt
 
 ## Database Tables
 
 - `inbound_event` — Raw request audit log
 - `event_log` — Normalized event outbox (partitioned monthly)
 - `dead_letter_event` — Rejected/failed events
-- `source_registration` — Registered event sources
 
 ## Configuration
 

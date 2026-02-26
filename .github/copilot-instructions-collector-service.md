@@ -119,24 +119,22 @@ cce-collector-service/
 │   │   │   │   ├── KafkaProducerConfig.java
 │   │   │   │   ├── FhirConfig.java              # FhirContext.forR4() singleton bean
 │   │   │   │   ├── JpaConfig.java
-│   │   │   │   ├── SecurityConfig.java           # mTLS / API key validation
+│   │   │   │   ├── SecurityConfig.java           # Security configuration (auth delegated to Gateway)
 │   │   │   │   └── WebConfig.java                # CORS, request logging
 │   │   │   ├── domain/
 │   │   │   │   ├── model/
 │   │   │   │   │   ├── InboundEvent.java         # Raw inbound request record (audit/dedup)
 │   │   │   │   │   ├── EventLog.java             # Normalized event published to Kafka (outbox)
 │   │   │   │   │   ├── DeadLetterEvent.java      # Rejected event record
-│   │   │   │   │   ├── SourceRegistration.java   # Registered event sources
 │   │   │   │   │   └── enums/
 │   │   │   │   │       ├── InboundStatus.java     # received, accepted, rejected, duplicate
 │   │   │   │   │       ├── PublishStatus.java     # pending, published, failed
 │   │   │   │   │       └── RejectionReason.java   # invalid_envelope, invalid_fhir, duplicate,
-│   │   │   │   │                                  # missing_subject, unknown_source, payload_too_large
+│   │   │   │   │                                  # missing_subject, payload_too_large
 │   │   │   │   └── repository/
 │   │   │   │       ├── InboundEventRepository.java
 │   │   │   │       ├── EventLogRepository.java
-│   │   │   │       ├── DeadLetterEventRepository.java
-│   │   │   │       └── SourceRegistrationRepository.java
+│   │   │   │       └── DeadLetterEventRepository.java
 │   │   │   ├── service/
 │   │   │   │   ├── EventIngestionService.java    # Main orchestrator: validate → normalize → persist → publish
 │   │   │   │   ├── CloudEventValidator.java      # CloudEvents v1.0 envelope validation
@@ -144,15 +142,13 @@ cce-collector-service/
 │   │   │   │   ├── EventNormalizer.java           # Standardize types, fill defaults, extract metadata
 │   │   │   │   ├── DeduplicationService.java      # (id, source) compound dedup via PostgreSQL with lookback window
 │   │   │   │   ├── EventPublisher.java            # Publishes event_log records to Kafka (outbox)
-│   │   │   │   ├── SourceRegistrationService.java # Manage allowed event sources
 │   │   │   │   └── DeadLetterService.java         # Persist and optionally publish dead letters
 │   │   │   ├── kafka/
 │   │   │   │   └── InboundEventProducer.java      # Publishes to cce.events.inbound
 │   │   │   ├── api/
 │   │   │   │   ├── controller/
 │   │   │   │   │   ├── EventIngestionController.java  # POST /v1/events — main entry point
-│   │   │   │   │   ├── DeadLetterController.java      # GET /v1/dead-letters — view rejected
-│   │   │   │   │   └── SourceController.java          # CRUD for registered sources
+│   │   │   │   │   └── DeadLetterController.java      # GET /v1/dead-letters — view rejected
 │   │   │   │   ├── dto/
 │   │   │   │   │   ├── ApiResponse.java               # { "data": ... } envelope
 │   │   │   │   │   ├── ApiError.java                  # { "error": { "code", "message" } }
@@ -172,8 +168,7 @@ cce-collector-service/
 │   │       └── db/migration/
 │   │           ├── V1__create_inbound_event.sql
 │   │           ├── V2__create_event_log.sql
-│   │           ├── V3__create_dead_letter_event.sql
-│   │           └── V4__create_source_registration.sql
+│   │           └── V3__create_dead_letter_event.sql
 │   └── test/
 │       └── java/org/openphc/cce/collector/
 │           ├── service/
@@ -298,7 +293,7 @@ CREATE TABLE dead_letter_event (
     rejection_reason VARCHAR NOT NULL
                      CHECK (rejection_reason IN (
                          'invalid_envelope', 'invalid_fhir', 'duplicate',
-                         'missing_subject', 'unknown_source', 'payload_too_large',
+                         'missing_subject', 'payload_too_large',
                          'deserialization_error', 'kafka_publish_failure'
                      )),
     failure_stage    VARCHAR NOT NULL
@@ -318,21 +313,7 @@ CREATE INDEX idx_dead_letter_source     ON dead_letter_event (source);
 CREATE INDEX idx_dead_letter_received   ON dead_letter_event (received_at);
 CREATE INDEX idx_dead_letter_unresolved ON dead_letter_event (next_retry_at) WHERE resolved = false;
 
--- Registered event sources (optional — for source allowlisting)
-CREATE TABLE source_registration (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_uri       VARCHAR NOT NULL UNIQUE,           -- e.g., "rhie-mediator", "smartcare-emr"
-    display_name     VARCHAR NOT NULL,
-    description      TEXT,
-    active           BOOLEAN NOT NULL DEFAULT true,
-    api_key_hash     VARCHAR,                            -- hashed API key for authentication
-    allowed_types    JSONB DEFAULT '[]',                 -- array of allowed event type patterns
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
-CREATE INDEX idx_source_registration_uri    ON source_registration (source_uri);
-CREATE INDEX idx_source_registration_active ON source_registration (active);
 ```
 
 ### Schema Conventions
@@ -349,13 +330,13 @@ CREATE INDEX idx_source_registration_active ON source_registration (active);
 
 ## REST API Endpoints
 
-The Collector Service exposes its ingestion API to external systems. In production, the CCE Gateway terminates TLS and routes requests. For direct integrations, mTLS or API key authentication is used.
+The Collector Service exposes its ingestion API to external systems. In production, the CCE Gateway terminates TLS, validates tokens, and routes requests to the Collector.
 
 ### Event Ingestion (Primary)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/v1/events` | API Key / mTLS | Ingest a single clinical event (CloudEvents envelope) |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/events` | Ingest a single clinical event (CloudEvents envelope) |
 
 ### Dead Letter Management
 
@@ -364,16 +345,6 @@ The Collector Service exposes its ingestion API to external systems. In producti
 | GET | `/v1/dead-letters` | `collector:admin` | List dead-letter events (filter by reason, source, date range) |
 | GET | `/v1/dead-letters/{id}` | `collector:admin` | Get a specific dead-letter event |
 | POST | `/v1/dead-letters/{id}/retry` | `collector:admin` | Re-process a dead-letter event |
-
-### Source Registration
-
-| Method | Path | Scope | Description |
-|--------|------|-------|-------------|
-| POST | `/v1/sources` | `collector:admin` | Register a new event source |
-| GET | `/v1/sources` | `collector:admin` | List registered sources |
-| GET | `/v1/sources/{id}` | `collector:admin` | Get source details |
-| PUT | `/v1/sources/{id}` | `collector:admin` | Update source registration |
-| DELETE | `/v1/sources/{id}` | `collector:admin` | Deactivate a source |
 
 ### Response Envelope
 
@@ -440,7 +411,7 @@ All inbound events MUST conform to CloudEvents v1.0 with CCE extensions:
 |-------|----------|------------|-------|
 | `specversion` | **Yes** | Must be `"1.0"` | CloudEvents spec version |
 | `id` | **Yes** | Non-empty string, max 256 chars | Globally unique event identifier |
-| `source` | **Yes** | Non-empty string (URI or short identifier) | Must match a registered source if source allowlisting is enabled |
+| `source` | **Yes** | Non-empty string (URI or short identifier) | Event source identifier (e.g., "rhie-mediator", "smartcare-emr") |
 | `type` | **Yes** | Non-empty string, must match pattern `org.openphc.cce.<resource>` or `cce.<resource>.<action>` | Event type — drives Tier 1 structural matching in Compliance Service |
 | `subject` | **Yes** (CCE requirement) | Non-empty string (patient UPID) | Partition key for Kafka; absent `subject` → reject |
 | `time` | Recommended | ISO 8601 datetime | If absent, Collector fills with `received_at` |
@@ -486,38 +457,34 @@ Per the CloudEvents specification, extension attribute names are `lowercase` wit
    b. specversion must be "1.0"
    c. subject must be non-empty (patient UPID required by CCE)
    d. If validation fails → 400 response + persist to dead_letter_event
-3. Source Validation (if source allowlisting enabled)
-   a. Check source_registration table: source is registered AND active
-   b. Validate API key if source requires it
-   c. If unknown/inactive source → 403 response + persist to dead_letter_event
-4. Persist to inbound_event table (status = 'received', raw_payload = original request body)
+3. Persist to inbound_event table (status = 'received', raw_payload = original request body)
    — This is the first write: raw audit record before any transformation
-5. Deduplication Check
+4. Deduplication Check
    a. Query PostgreSQL: check if (source, cloudevents_id) exists within lookback window
       - If exists → update inbound_event.status = 'duplicate', return 200 (idempotent)
    b. If not found → proceed (DB unique constraint on event_log is the authoritative check)
-6. Normalization
+5. Normalization
    a. Normalize event type to org.openphc.cce.* pattern
    b. Generate correlationid if absent (new UUID with "corr-" prefix)
    c. Fill time with server received_at if absent
    d. Map lowercase CloudEvents field names → camelCase for Kafka message
-7. FHIR Payload Validation (if datacontenttype = application/fhir+json)
+6. FHIR Payload Validation (if datacontenttype = application/fhir+json)
    a. Parse data via HAPI FHIR: fhirContext.newJsonParser().parseResource(json)
    b. Validate resourceType is a known FHIR R4 resource type
    c. Validate subject reference matches CloudEvents subject (patient ID consistency)
    d. If invalid → update inbound_event.status = 'rejected',
       persist to dead_letter_event (failure_stage = 'validation'), return 422
-8. Update inbound_event.status = 'accepted'
-9. Persist normalized event to event_log table (publish_status = 'pending')
+7. Update inbound_event.status = 'accepted'
+8. Persist normalized event to event_log table (publish_status = 'pending')
    — This is the outbox record: the normalized CloudEventMessage ready for Kafka
-10. Publish event_log record to Kafka topic cce.events.inbound
+9. Publish event_log record to Kafka topic cce.events.inbound
     a. Key = subject (patient_id) — guarantees per-patient message ordering
     b. Value = normalized CloudEventMessage JSON (built from event_log fields)
     c. On success: update event_log.publish_status = 'published',
        record kafka_topic, kafka_partition, kafka_offset, published_at
     d. On failure: event_log stays publish_status = 'pending' (retry on next attempt)
        + persist to dead_letter_event (failure_stage = 'kafka_publish')
-11. Return HTTP response with ingestion receipt
+10. Return HTTP response with ingestion receipt
 ```
 
 ### Kafka Publish Contract
@@ -786,24 +753,9 @@ public OffsetDateTime ensureEventTime(String rawTime) {
 
 ## Authentication & Security
 
-### API Key Authentication (Primary)
+### Authentication
 
-External sources authenticate using an API key in the `X-API-Key` header:
-
-```java
-@Component
-public class ApiKeyFilter extends OncePerRequestFilter {
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, ...) {
-        String apiKey = request.getHeader("X-API-Key");
-        if (apiKey == null || !sourceRegistrationService.validateApiKey(apiKey)) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return;
-        }
-        filterChain.doFilter(request, response);
-    }
-}
-```
+Authentication is **not handled directly** by the Collector Service — the CCE Gateway Service validates tokens and authorizes operations before forwarding requests to the Collector (per CCE Solution Design v0.3 Section 7.2.1).
 
 ### mTLS (Production)
 
@@ -818,7 +770,7 @@ Per-source rate limiting to prevent a single source from overwhelming the system
 | openHIM mediator | 1000 events/min | 1 minute sliding |
 | Direct EMR integration | 200 events/min | 1 minute sliding |
 
-Rate limits are configurable per source via `source_registration.allowed_types` or a dedicated config.
+Rate limits are configurable per source via application configuration.
 
 ---
 
@@ -997,7 +949,7 @@ cce:
       dead-letter: cce.deadletter
   collector:
     max-payload-size: 1048576          # 1 MB for single event
-    source-allowlisting: false         # Set true to enforce source registration
+
     fhir-validation:
       enabled: true
       strict-mode: false               # true = reject on any warning; false = warnings logged only
@@ -1092,7 +1044,7 @@ Use multi-stage build for production: builder stage with Maven + JDK, runtime st
 - Collector runs on port **8080** (same port as other CCE services; Gateway routes by hostname)
 - PgBouncer in transaction-mode pooling recommended for connection management
 - In production, the CCE Gateway routes `/v1/events*` to the Collector Service
-- API key management: store hashed keys in `source_registration` table; rotate via admin API
+- Authentication is handled by the CCE Gateway Service (not the Collector directly)
 
 ---
 

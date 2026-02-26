@@ -74,7 +74,7 @@ curl -X POST http://localhost:8080/v1/events \
 |---------|------|-------------|
 | (default) | `application.yml` | Base configuration |
 | `local` | `application-local.yml` | Debug logging, relaxed pool sizes |
-| `staging` | `application-staging.yml` | Source allowlisting enabled, moderate pool sizes |
+| `staging` | `application-staging.yml` | Moderate pool sizes |
 | `production` | `application-production.yml` | Optimized pool sizes, shorter retry intervals |
 
 Activate a profile:
@@ -111,7 +111,6 @@ All configuration can be overridden via environment variables using Spring Boot'
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CCE_COLLECTOR_SOURCE_VALIDATION_ENABLED` | `false` | Enable source allowlisting |
 | `CCE_COLLECTOR_FHIR_STRICT_VALIDATION` | `false` | Enable strict FHIR validation |
 | `CCE_COLLECTOR_DEDUP_LOOKBACK_DAYS` | `30` | Dedup lookback window (days) |
 | `CCE_COLLECTOR_KAFKA_TOPICS_INBOUND` | `cce.events.inbound` | Inbound events topic |
@@ -158,7 +157,7 @@ Flyway runs automatically on startup. Migrations are located in `src/main/resour
 | `V1__create_inbound_event.sql` | `inbound_event` table with dedup constraint |
 | `V2__create_event_log.sql` | `event_log` table, partitioned by month (Jan–Jun 2026) |
 | `V3__create_dead_letter_event.sql` | `dead_letter_event` table with retry support |
-| `V4__create_source_registration.sql` | `source_registration` table |
+| `V4__remove_unknown_source_from_dead_letter.sql` | Removes `UNKNOWN_SOURCE` from rejection_reason CHECK constraint |
 
 ### Manual Migration Execution
 
@@ -327,7 +326,6 @@ kafka-topics.sh --create \
 - [ ] Kafka: Set `min.insync.replicas=2` on inbound topic
 - [ ] Application: Set `SPRING_PROFILES_ACTIVE=production`
 - [ ] Application: Set real database credentials via secrets
-- [ ] Application: Configure `cce.collector.source-validation-enabled=true` in staging/production
 - [ ] Monitoring: Expose `/actuator/prometheus` to Prometheus scraper
 - [ ] Logging: Configure log aggregation (ELK/Loki) — JSON structured output enabled by default
 - [ ] TLS: Terminate TLS at load balancer or ingress controller
